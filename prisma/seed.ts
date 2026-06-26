@@ -93,12 +93,15 @@ async function main() {
   console.log(`Seeded default student ${student.name}`);
 }
 
-main()
-  .finally(async () => {
-    await prisma.$disconnect();
-  })
-  .catch(async (error) => {
+async function run() {
+  try {
+    await main();
+  } catch (error) {
     console.error(error);
+    process.exitCode = 1;
+  } finally {
     await prisma.$disconnect();
-    process.exit(1);
-  });
+  }
+}
+
+void run();
