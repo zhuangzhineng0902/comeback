@@ -47,6 +47,7 @@ CREATE TABLE "KnowledgeGap" (
     "relatedMistakeCount" INTEGER NOT NULL DEFAULT 0,
     "repeatedArchetypeCount" INTEGER NOT NULL DEFAULT 0,
     "severity" TEXT NOT NULL DEFAULT 'normal',
+    "severityRank" INTEGER NOT NULL DEFAULT 0,
     "typicalReasons" TEXT NOT NULL DEFAULT '[]',
     "lastOccurredAt" DATETIME,
     "masteryLevel" INTEGER NOT NULL DEFAULT 0,
@@ -116,3 +117,12 @@ CREATE UNIQUE INDEX "Archetype_subject_grade_knowledgePointId_title_key" ON "Arc
 
 -- CreateIndex
 CREATE INDEX "MistakeArchetype_archetypeId_idx" ON "MistakeArchetype"("archetypeId");
+
+-- CreateIndex
+CREATE INDEX "MistakeArchetype_mistakeId_idx" ON "MistakeArchetype"("mistakeId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MistakeArchetype_mistakeId_archetypeId_key" ON "MistakeArchetype"("mistakeId", "archetypeId");
+
+-- CreateIndex
+CREATE INDEX "TutorMessage_mistakeId_idx" ON "TutorMessage"("mistakeId");

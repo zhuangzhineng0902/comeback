@@ -10,9 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "prisma:generate": "DATABASE_URL=\"file:./dev.db\" prisma generate",
+    "prisma:generate": "node scripts/prisma-generate.mjs",
     "prisma:migrate": "node scripts/prisma-migrate.mjs",
-    "prisma:seed": "DATABASE_URL=\"file:./dev.db\" tsx prisma/seed.ts"
+    "prisma:seed": "node scripts/prisma-seed.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",
@@ -40,8 +40,5 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
-  },
-  "prisma": {
-    "seed": "DATABASE_URL=\"file:./dev.db\" tsx prisma/seed.ts"
   }
 }

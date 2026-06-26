@@ -65,6 +65,7 @@ model KnowledgeGap {
   relatedMistakeCount    Int            @default(0)
   repeatedArchetypeCount Int            @default(0)
   severity               String         @default("normal")
+  severityRank           Int            @default(0)
   typicalReasons         String         @default("[]")
   lastOccurredAt         DateTime?
   masteryLevel           Int            @default(0)
@@ -100,6 +101,8 @@ model MistakeArchetype {
   archetype       Archetype @relation(fields: [archetypeId], references: [id])
 
   @@index([archetypeId])
+  @@index([mistakeId])
+  @@unique([mistakeId, archetypeId])
 }
 
 model TutorMessage {
@@ -109,6 +112,8 @@ model TutorMessage {
   content   String
   createdAt DateTime @default(now())
   mistake   Mistake  @relation(fields: [mistakeId], references: [id])
+
+  @@index([mistakeId])
 }
 
 model NonStudyRequestLog {

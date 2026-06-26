@@ -5,10 +5,10 @@ import { spawnSync } from "node:child_process";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const env = { ...process.env, DATABASE_URL: process.env.DATABASE_URL ?? "file:./dev.db" };
 
-const prisma = spawnSync("prisma", ["migrate", "dev", ...process.argv.slice(2)], {
+const generate = spawnSync("prisma", ["generate"], {
   cwd: root,
   env,
   stdio: "inherit"
 });
 
-process.exit(prisma.status ?? 1);
+process.exit(generate.status ?? 1);
