@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Student {
+  id                  String               @id @default(cuid())
+  name                String
+  currentGrade        String
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  mistakes            Mistake[]
+  knowledgeGaps       KnowledgeGap[]
+  nonStudyRequestLogs NonStudyRequestLog[]
+}
+
+model Mistake {
+  id                 String              @id @default(cuid())
+  studentId          String
+  imagePath          String
+  recognizedText     String
+  subject            String
+  grade              String
+  questionType       String
+  studentAnswer      String
+  correctAnswer      String
+  explanation        String
+  mistakeReason      String
+  masteryStatus      String              @default("new")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  student            Student             @relation(fields: [studentId], references: [id])
+  mistakeArchetypes  MistakeArchetype[]
+  tutorMessages      TutorMessage[]
+
+  @@index([studentId, subject, grade])
+}
+
+model KnowledgePoint {
+  id            String           @id @default(cuid())
+  subject       String
+  grade         String
+  name          String
+  chapter       String
+  parentId      String?
+  sortOrder     Int              @default(0)
+  parent        KnowledgePoint?  @relation("KnowledgePointTree", fields: [parentId], references: [id])
+  children      KnowledgePoint[] @relation("KnowledgePointTree")
+  knowledgeGaps KnowledgeGap[]
+  archetypes    Archetype[]
+
+  @@unique([subject, grade, name])
+  @@index([subject, grade])
+}
+
+model KnowledgeGap {
+  id                     String         @id @default(cuid())
+  studentId              String
+  knowledgePointId       String
+  errorCount             Int            @default(0)
+  relatedMistakeCount    Int            @default(0)
+  repeatedArchetypeCount Int            @default(0)
+  severity               String         @default("normal")
+  typicalReasons         String         @default("[]")
+  lastOccurredAt         DateTime?
+  masteryLevel           Int            @default(0)
+  reviewSuggestion       String
+  student                Student        @relation(fields: [studentId], references: [id])
+  knowledgePoint         KnowledgePoint @relation(fields: [knowledgePointId], references: [id])
+
+  @@unique([studentId, knowledgePointId])
+}
+
+model Archetype {
+  id                String             @id @default(cuid())
+  subject           String
+  grade             String
+  knowledgePointId  String
+  title             String
+  pattern           String
+  solutionTemplate  String
+  commonTraps       String
+  knowledgePoint    KnowledgePoint     @relation(fields: [knowledgePointId], references: [id])
+  mistakeArchetypes MistakeArchetype[]
+
+  @@unique([subject, grade, knowledgePointId, title])
+}
+
+model MistakeArchetype {
+  id              String    @id @default(cuid())
+  mistakeId       String
+  archetypeId     String
+  similarityScore Float
+  createdAt       DateTime  @default(now())
+  mistake         Mistake   @relation(fields: [mistakeId], references: [id])
+  archetype       Archetype @relation(fields: [archetypeId], references: [id])
+
+  @@index([archetypeId])
+}
+
+model TutorMessage {
+  id        String   @id @default(cuid())
+  mistakeId String
+  role      String
+  content   String
+  createdAt DateTime @default(now())
+  mistake   Mistake  @relation(fields: [mistakeId], references: [id])
+}
+
+model NonStudyRequestLog {
+  id             String   @id @default(cuid())
+  studentId      String
+  contentSummary String
+  category       String
+  createdAt      DateTime @default(now())
+  student        Student  @relation(fields: [studentId], references: [id])
+}

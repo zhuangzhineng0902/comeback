@@ -8,3 +8,5 @@ coverage/
 .env.local
 uploads/
 *.log
+prisma/dev.db
+prisma/dev.db-journal
