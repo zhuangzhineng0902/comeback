@@ -53,12 +53,14 @@ export function classifyStudyIntent(input: string): StudyIntentResult {
 }
 
 export function createStudyRefusal(category: Exclude<StudyIntentCategory, "study">): string {
-  const topic =
+  const reason =
     category === "game"
-      ? "游戏相关内容"
+      ? "游戏相关内容我不能帮你查"
       : category === "entertainment"
-        ? "娱乐视频内容"
-        : "这个内容";
+        ? "娱乐视频内容我不能帮你推荐"
+        : category === "bypass"
+          ? "规则限制我不能绕过"
+          : "闲聊我先不展开";
 
-  return `我主要帮你学习，${topic}我不能帮你查。我们可以回到刚才的错题，我帮你把关键步骤讲清楚，或者给你出一道类似题练练。`;
+  return `我主要帮你学习，${reason}。我们可以回到刚才的错题，我帮你把关键步骤讲清楚，或者给你出一道类似题练练。`;
 }
