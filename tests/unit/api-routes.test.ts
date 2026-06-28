@@ -101,6 +101,9 @@ describe("api routes", () => {
       filename: "paper photo.png",
       mimeType: "image/png",
       imageBase64: Buffer.from("image-bytes").toString("base64"),
+      images: [
+        { filename: "paper photo.png", mimeType: "image/png", imageBase64: Buffer.from("image-bytes").toString("base64") }
+      ],
       subjectHint: "数学",
       gradeHint: "八年级"
     });
@@ -113,13 +116,64 @@ describe("api routes", () => {
     );
   });
 
+  it("analyzes up to sixteen uploaded images without subject or grade hints", async () => {
+    analyzeMistakeMock.mockResolvedValue({ mode: "api", analysis });
+    saveAnalysisAsMistakeMock.mockResolvedValue({
+      mistake: { id: "mistake-1" },
+      gap: { severity: "important" }
+    });
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    for (let index = 1; index <= 2; index += 1) {
+      const file = new File([`image-${index}`], `page-${index}.png`, { type: "image/png" });
+      Object.defineProperty(file, "arrayBuffer", {
+        value: async () => new TextEncoder().encode(`image-${index}`).buffer
+      });
+      formData.append("files", file);
+    }
+
+    const response = await POST({ formData: async () => formData } as Request);
+
+    expect(await response.json()).toMatchObject({ mode: "api", mistakeId: "mistake-1" });
+    expect(analyzeMistakeMock).toHaveBeenCalledWith({
+      filename: "page-1.png, page-2.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-1").toString("base64"),
+      images: [
+        { filename: "page-1.png", mimeType: "image/png", imageBase64: Buffer.from("image-1").toString("base64") },
+        { filename: "page-2.png", mimeType: "image/png", imageBase64: Buffer.from("image-2").toString("base64") }
+      ],
+      subjectHint: undefined,
+      gradeHint: undefined
+    });
+    expect(saveAnalysisAsMistakeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        imagePath: expect.stringMatching(/^uploads\/[0-9a-f-]+-page-1\.png$/)
+      })
+    );
+  });
+
+  it("rejects more than sixteen uploaded images", async () => {
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    for (let index = 1; index <= 17; index += 1) {
+      formData.append("files", new File(["image"], `page-${index}.png`, { type: "image/png" }));
+    }
+
+    const response = await POST({ formData: async () => formData } as Request);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "一次最多上传 16 张图片。" });
+    expect(analyzeMistakeMock).not.toHaveBeenCalled();
+  });
+
   it("rejects analyze requests without an uploaded file", async () => {
     const { POST } = await import("@/app/api/analyze/route");
 
     const response = await POST({ formData: async () => new FormData() } as Request);
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: "请先上传一张试卷或习题照片。" });
+    await expect(response.json()).resolves.toEqual({ error: "请先上传至少一张试卷或习题照片。" });
   });
 
   it("rejects non-image uploads before analysis", async () => {
@@ -147,7 +201,7 @@ describe("api routes", () => {
     const response = await POST({ formData: async () => formData } as Request);
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: "图片不能超过 8MB，请压缩后再上传。" });
+    await expect(response.json()).resolves.toEqual({ error: "单张图片不能超过 8MB，请压缩后再上传。" });
     expect(file.arrayBuffer).not.toHaveBeenCalled();
     expect(analyzeMistakeMock).not.toHaveBeenCalled();
   });

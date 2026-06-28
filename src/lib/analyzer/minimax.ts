@@ -67,7 +67,8 @@ function buildPrompt(input: AnalyzeInput) {
     "practiceQuestions 给 1 到 3 道同类练习，必须是对象数组，每道包含 question, answer, hint。",
     "不要用省略号，不要用字符串替代对象，不要输出 <think>。",
     "讲解要适合孩子阅读，深入浅出，但不要涉及游戏、娱乐网站、闲聊内容。",
-    `用户提示学科：${input.subjectHint ?? "未提供"}；用户提示年级：${input.gradeHint ?? "未提供"}；文件名：${input.filename}。`
+    "如果用户未提供学科或年级，请根据图片内容自动判断，不要默认八年级数学。",
+    `用户提示学科：${input.subjectHint ?? "未提供，请自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请自动识别"}；文件名：${input.filename}。`
   ].join("\n");
 }
 
@@ -113,8 +114,12 @@ function normalizeAnalysisShape(value: unknown): unknown {
 }
 
 function parseAnalysis(content: string): AnalysisOutput {
-  const parsed = JSON.parse(extractJsonObject(content)) as unknown;
-  return analysisSchema.parse(normalizeAnalysisShape(parsed));
+  try {
+    const parsed = JSON.parse(extractJsonObject(content)) as unknown;
+    return analysisSchema.parse(normalizeAnalysisShape(parsed));
+  } catch (error) {
+    throw new Error(`MiniMax response could not be parsed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisOutput> {
@@ -124,7 +129,13 @@ export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisO
   }
 
   const baseUrl = (process.env.MINIMAX_BASE_URL ?? defaultMiniMaxBaseUrl).replace(/\/+$/, "");
-  const dataUrl = `data:${input.mimeType};base64,${input.imageBase64}`;
+  const images = input.images?.length
+    ? input.images
+    : [{ filename: input.filename, mimeType: input.mimeType, imageBase64: input.imageBase64 }];
+  const imageContent = images.map((image) => ({
+    type: "image_url",
+    image_url: { url: `data:${image.mimeType};base64,${image.imageBase64}` }
+  }));
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -138,7 +149,7 @@ export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisO
           role: "user",
           content: [
             { type: "text", text: buildPrompt(input) },
-            { type: "image_url", image_url: { url: dataUrl } }
+            ...imageContent
           ]
         }
       ],

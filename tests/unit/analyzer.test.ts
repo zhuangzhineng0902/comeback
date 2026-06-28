@@ -25,6 +25,7 @@ const minimaxAnalysis = {
 afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.MINIMAX_API_KEY;
+  delete process.env.MINIMAX_BASE_URL;
   delete process.env.MINIMAX_MODEL;
 });
 
@@ -82,6 +83,37 @@ describe("simulated analyzer", () => {
         })
       })
     );
+  });
+
+  it("sends every uploaded image to MiniMax", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(minimaxAnalysis) } }]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await analyzeMistake({
+      filename: "page-1.png, page-2.png",
+      mimeType: "image/png",
+      imageBase64: "first-image",
+      images: [
+        { filename: "page-1.png", mimeType: "image/png", imageBase64: "first-image" },
+        { filename: "page-2.png", mimeType: "image/jpeg", imageBase64: "second-image" }
+      ]
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as {
+      messages: Array<{ content: Array<{ type: string; image_url?: { url: string } }> }>;
+    };
+    const imageUrls = requestBody.messages[0].content
+      .filter((item) => item.type === "image_url")
+      .map((item) => item.image_url?.url);
+    expect(imageUrls).toEqual(["data:image/png;base64,first-image", "data:image/jpeg;base64,second-image"]);
   });
 
   it("allows overriding the MiniMax base URL for compatible deployments", async () => {
@@ -167,7 +199,7 @@ describe("simulated analyzer", () => {
     expect(result.analysis.practiceQuestions[0].question).toBe("一次函数 y=-x+5 的图像经过哪些象限？");
   });
 
-  it("falls back to simulation when MiniMax returns unparseable content", async () => {
+  it("surfaces MiniMax failures instead of silently falling back when a key is configured", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     vi.stubGlobal(
       "fetch",
@@ -179,6 +211,14 @@ describe("simulated analyzer", () => {
       )
     );
 
+    await expect(analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    })).rejects.toThrow("MiniMax");
+  });
+
+  it("uses simulation only when MiniMax is not configured", async () => {
     const result = await analyzeMistake({
       filename: "worksheet.png",
       mimeType: "image/png",
@@ -186,6 +226,5 @@ describe("simulated analyzer", () => {
     });
 
     expect(result.mode).toBe("simulation");
-    expect(result.analysis.knowledgePoints[0].name).toBe("一次函数图像与性质");
   });
 });

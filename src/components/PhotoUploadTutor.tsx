@@ -29,9 +29,9 @@ async function readJson(response: Response) {
 }
 
 export function PhotoUploadTutor() {
-  const [file, setFile] = useState<File | null>(null);
-  const [subjectHint, setSubjectHint] = useState<Subject>("数学");
-  const [gradeHint, setGradeHint] = useState<Grade>("八年级");
+  const [files, setFiles] = useState<File[]>([]);
+  const [subjectHint, setSubjectHint] = useState<Subject | "">("");
+  const [gradeHint, setGradeHint] = useState<Grade | "">("");
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: "assistant", content: defaultAssistantMessage }
@@ -42,8 +42,8 @@ export function PhotoUploadTutor() {
   const [isChatting, setIsChatting] = useState(false);
 
   async function analyze() {
-    if (!file) {
-      setError("请先选择一张错题照片。");
+    if (files.length === 0) {
+      setError("请先选择至少一张错题照片。");
       return;
     }
 
@@ -51,9 +51,13 @@ export function PhotoUploadTutor() {
     setIsAnalyzing(true);
 
     const formData = new FormData();
-    formData.append("file", file);
-    formData.append("subjectHint", subjectHint);
-    formData.append("gradeHint", gradeHint);
+    files.forEach((item) => formData.append("files", item));
+    if (subjectHint) {
+      formData.append("subjectHint", subjectHint);
+    }
+    if (gradeHint) {
+      formData.append("gradeHint", gradeHint);
+    }
 
     try {
       const response = await fetch("/api/analyze", {
@@ -81,6 +85,25 @@ export function PhotoUploadTutor() {
       setIsAnalyzing(false);
     }
   }
+
+  function selectFiles(fileList: FileList | null) {
+    const nextFiles = Array.from(fileList ?? []);
+    if (nextFiles.length > 16) {
+      setFiles(nextFiles.slice(0, 16));
+      setError("一次最多上传 16 张图片。");
+      return;
+    }
+
+    setFiles(nextFiles);
+    setError("");
+  }
+
+  const fileSummary =
+    files.length === 0
+      ? "JPG、PNG、WebP 或 HEIC，单张最大 8MB，最多 16 张"
+      : files.length === 1
+        ? files[0].name
+        : `已选择 ${files.length} 张图片`;
 
   async function sendQuestion() {
     const trimmed = question.trim();
@@ -148,12 +171,13 @@ export function PhotoUploadTutor() {
           <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_160px_160px]">
             <label className="flex min-h-28 cursor-pointer flex-col justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 transition hover:border-slate-400 hover:bg-white">
               <span className="text-sm font-medium text-ink">上传错题照片</span>
-              <span className="mt-1 text-xs text-slate-500">{file ? file.name : "JPG、PNG、WebP 或 HEIC，最大 8MB"}</span>
+              <span className="mt-1 text-xs text-slate-500">{fileSummary}</span>
               <input
                 type="file"
                 accept="image/*"
+                multiple
                 className="sr-only"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => selectFiles(event.target.files)}
               />
             </label>
 
@@ -161,9 +185,10 @@ export function PhotoUploadTutor() {
               学科
               <select
                 value={subjectHint}
-                onChange={(event) => setSubjectHint(event.target.value as Subject)}
+                onChange={(event) => setSubjectHint(event.target.value as Subject | "")}
                 className="mt-2 h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-ink"
               >
+                <option value="">自动识别学科</option>
                 {subjects.map((subject) => (
                   <option key={subject} value={subject}>
                     {subject}
@@ -176,9 +201,10 @@ export function PhotoUploadTutor() {
               年级
               <select
                 value={gradeHint}
-                onChange={(event) => setGradeHint(event.target.value as Grade)}
+                onChange={(event) => setGradeHint(event.target.value as Grade | "")}
                 className="mt-2 h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-ink"
               >
+                <option value="">自动识别年级</option>
                 {grades.map((grade) => (
                   <option key={grade} value={grade}>
                     {grade}

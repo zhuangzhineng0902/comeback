@@ -4,6 +4,11 @@ export type AnalyzeInput = {
   filename: string;
   mimeType?: string;
   imageBase64?: string;
+  images?: Array<{
+    filename: string;
+    mimeType: string;
+    imageBase64: string;
+  }>;
   subjectHint?: Subject;
   gradeHint?: Grade;
 };
