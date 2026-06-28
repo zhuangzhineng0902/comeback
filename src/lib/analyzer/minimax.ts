@@ -42,6 +42,18 @@ function stripJsonFence(content: string) {
   return fenced?.[1]?.trim() ?? trimmed;
 }
 
+function extractJsonObject(content: string) {
+  const stripped = stripJsonFence(content);
+  const start = stripped.indexOf("{");
+  const end = stripped.lastIndexOf("}");
+
+  if (start === -1 || end === -1 || end <= start) {
+    return stripped;
+  }
+
+  return stripped.slice(start, end + 1);
+}
+
 function buildPrompt(input: AnalyzeInput) {
   return [
     "你是一个只服务初中学生学习的私人教师 Agent。",
@@ -50,16 +62,59 @@ function buildPrompt(input: AnalyzeInput) {
     "subject 必须是：语文、数学、英语、物理、化学、生物、历史、地理、道德与法治之一。",
     "grade 必须是：七年级、八年级、九年级之一。",
     "knowledgePoints 至少 1 个，confidence 是 0 到 1 的数字。",
-    "archetype 包含 title, pattern, solutionTemplate, commonTraps。",
-    "practiceQuestions 给 1 到 3 道同类练习，每道包含 question, answer, hint。",
+    "knowledgePoints 的格式必须是对象数组，例如 [{\"name\":\"一次函数图像与性质\",\"confidence\":0.9}]。",
+    "archetype 必须是对象，包含 title, pattern, solutionTemplate, commonTraps。",
+    "practiceQuestions 给 1 到 3 道同类练习，必须是对象数组，每道包含 question, answer, hint。",
+    "不要用省略号，不要用字符串替代对象，不要输出 <think>。",
     "讲解要适合孩子阅读，深入浅出，但不要涉及游戏、娱乐网站、闲聊内容。",
     `用户提示学科：${input.subjectHint ?? "未提供"}；用户提示年级：${input.gradeHint ?? "未提供"}；文件名：${input.filename}。`
   ].join("\n");
 }
 
+function normalizeAnalysisShape(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const record = { ...(value as Record<string, unknown>) };
+
+  if (Array.isArray(record.knowledgePoints)) {
+    record.knowledgePoints = record.knowledgePoints.map((point) => {
+      if (typeof point === "string") {
+        return { name: point, confidence: 0.8 };
+      }
+      return point;
+    });
+  }
+
+  if (typeof record.archetype === "string") {
+    record.archetype = {
+      title: record.archetype,
+      pattern: record.archetype,
+      solutionTemplate: record.archetype,
+      commonTraps: ["只记结论，没有套用完整母题模板"]
+    };
+  }
+
+  if (Array.isArray(record.practiceQuestions)) {
+    record.practiceQuestions = record.practiceQuestions.map((question) => {
+      if (typeof question === "string") {
+        return {
+          question,
+          answer: "请先尝试作答，再让老师批改。",
+          hint: "套用本题母题模板，先找关键条件，再按步骤判断。"
+        };
+      }
+      return question;
+    });
+  }
+
+  return record;
+}
+
 function parseAnalysis(content: string): AnalysisOutput {
-  const parsed = JSON.parse(stripJsonFence(content)) as unknown;
-  return analysisSchema.parse(parsed);
+  const parsed = JSON.parse(extractJsonObject(content)) as unknown;
+  return analysisSchema.parse(normalizeAnalysisShape(parsed));
 }
 
 export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisOutput> {

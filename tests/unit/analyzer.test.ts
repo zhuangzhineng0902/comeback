@@ -106,6 +106,67 @@ describe("simulated analyzer", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://example.test/v1/chat/completions", expect.any(Object));
   });
 
+  it("accepts MiniMax responses that include reasoning text before JSON", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: `<think>先识别题目。</think>\n${JSON.stringify(minimaxAnalysis)}` } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.mode).toBe("api");
+    expect(result.analysis.archetype.title).toBe("一次函数图像性质判断母题");
+  });
+
+  it("normalizes common MiniMax string arrays into the app analysis shape", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    ...minimaxAnalysis,
+                    knowledgePoints: ["一次函数图像与性质"],
+                    archetype: "一次函数 y=kx+b 象限判断母题",
+                    practiceQuestions: ["一次函数 y=-x+5 的图像经过哪些象限？"]
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.mode).toBe("api");
+    expect(result.analysis.knowledgePoints[0]).toEqual({ name: "一次函数图像与性质", confidence: 0.8 });
+    expect(result.analysis.archetype.title).toBe("一次函数 y=kx+b 象限判断母题");
+    expect(result.analysis.practiceQuestions[0].question).toBe("一次函数 y=-x+5 的图像经过哪些象限？");
+  });
+
   it("falls back to simulation when MiniMax returns unparseable content", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     vi.stubGlobal(
