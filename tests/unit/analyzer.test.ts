@@ -22,6 +22,39 @@ const minimaxAnalysis = {
   practiceQuestions: [{ question: "y=-x+2 经过哪些象限？", answer: "一二四", hint: "先看 k<0。" }]
 };
 
+const richExplanation = {
+  diagnosis: "这道题错在只看到了 two pens，没有看离 be 最近的 a book。",
+  analogy: "There be 就像排队点名，be 动词只听离自己最近的同学回答。",
+  walkthrough: [
+    { title: "先找最近名词", body: "空格后最近的是 a book。" },
+    { title: "再判断单复数", body: "a book 是单数，所以 be 动词用 is。" }
+  ],
+  wrongAnswerInsight: "B. are 看起来像对，是因为后面出现了复数 two pens。",
+  treeContext: {
+    path: ["英语", "七年级", "语法", "There be 句型", "就近原则"],
+    prerequisites: ["名词单复数", "be 动词 is/are"],
+    current: ["There be 句型就近原则"],
+    next: ["主谓一致", "倒装句识别"],
+    confusions: ["只看最后一个名词", "忽略离 be 最近的主语"]
+  },
+  illustration: {
+    type: "flow",
+    title: "be 动词看最近名词",
+    nodes: [
+      { label: "There", detail: "句型开头" },
+      { label: "is", detail: "由最近名词决定", tone: "focus" },
+      { label: "a book", detail: "最近且单数", tone: "warning" },
+      { label: "two pens", detail: "更远，不决定 be" }
+    ]
+  },
+  shenzhenExample: {
+    label: "深圳题型风格",
+    question: "There ____ two books and a ruler on the desk.",
+    answer: "are",
+    explanation: "离空格最近的是 two books，是复数，所以用 are。"
+  }
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.MINIMAX_API_KEY;
@@ -83,6 +116,47 @@ describe("simulated analyzer", () => {
         })
       })
     );
+  });
+
+  it("parses rich MiniMax explanations for board-style teaching", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    ...minimaxAnalysis,
+                    richExplanation
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.analysis.richExplanation?.diagnosis).toContain("a book");
+    expect(result.analysis.richExplanation?.illustration?.type).toBe("flow");
+    expect(result.analysis.richExplanation?.treeContext.path).toEqual([
+      "英语",
+      "七年级",
+      "语法",
+      "There be 句型",
+      "就近原则"
+    ]);
+    expect(result.analysis.richExplanation?.shenzhenExample.label).toBe("深圳题型风格");
   });
 
   it("sends every uploaded image to MiniMax", async () => {
