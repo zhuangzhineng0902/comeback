@@ -199,6 +199,50 @@ describe("simulated analyzer", () => {
     expect(result.analysis.practiceQuestions[0].question).toBe("一次函数 y=-x+5 的图像经过哪些象限？");
   });
 
+  it("repairs non-JSON MiniMax content with a second text-only request", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content:
+                    "<think>The image is a linear-function mistake. The student only checked b and ignored k.</think>"
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(minimaxAnalysis) } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.mode).toBe("api");
+    expect(result.analysis.questionType).toBe("一次函数应用题");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const repairBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)) as {
+      messages: Array<{ content: string }>;
+    };
+    expect(repairBody.messages[0].content).toContain("转换成严格 JSON");
+  });
+
   it("surfaces MiniMax failures instead of silently falling back when a key is configured", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     vi.stubGlobal(
