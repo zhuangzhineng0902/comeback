@@ -1,0 +1,228 @@
+import { mkdir, rm } from "node:fs/promises";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const analysis = {
+  subject: "数学",
+  grade: "八年级",
+  questionType: "选择题",
+  recognizedText: "一次函数题目",
+  studentAnswer: "A",
+  correctAnswer: "B",
+  knowledgePoints: [{ name: "一次函数图像与性质", confidence: 0.9 }],
+  mistakeReason: "忽略斜率符号",
+  studentFriendlyExplanation: "先看斜率，再看截距。",
+  example: "y=2x+1",
+  archetype: {
+    title: "一次函数图像性质判断母题",
+    pattern: "判断一次函数图像",
+    solutionTemplate: "看 k 和 b",
+    commonTraps: ["把 k 和 b 混淆"]
+  },
+  practiceQuestions: [{ question: "y=x+1 经过几象限？", answer: "一二三", hint: "看 k 和 b" }]
+};
+
+const analyzeMistakeMock = vi.fn();
+const saveAnalysisAsMistakeMock = vi.fn();
+const prismaMock = {
+  mistake: {
+    findMany: vi.fn(),
+    findUnique: vi.fn()
+  },
+  knowledgeGap: {
+    findMany: vi.fn()
+  },
+  knowledgePoint: {
+    findMany: vi.fn()
+  },
+  nonStudyRequestLog: {
+    create: vi.fn()
+  },
+  tutorMessage: {
+    createMany: vi.fn()
+  }
+};
+
+vi.mock("@/lib/analyzer", () => ({
+  analyzeMistake: analyzeMistakeMock
+}));
+
+vi.mock("@/lib/repositories/mistakes", () => ({
+  saveAnalysisAsMistake: saveAnalysisAsMistakeMock
+}));
+
+vi.mock("@/lib/db", () => ({
+  prisma: prismaMock
+}));
+
+describe("api routes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    await rm(path.join(process.cwd(), "uploads"), { recursive: true, force: true });
+    await mkdir(path.join(process.cwd(), "uploads"), { recursive: true });
+  });
+
+  it("analyzes an uploaded mistake and saves the result", async () => {
+    analyzeMistakeMock.mockResolvedValue({ mode: "simulation", analysis });
+    saveAnalysisAsMistakeMock.mockResolvedValue({
+      mistake: { id: "mistake-1" },
+      gap: { severity: "normal" }
+    });
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    const file = new File(["image-bytes"], "paper photo.png", { type: "image/png" });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new TextEncoder().encode("image-bytes").buffer
+    });
+    formData.set("file", file);
+    formData.set("subjectHint", "数学");
+    formData.set("gradeHint", "八年级");
+
+    const response = await POST({ formData: async () => formData } as Request);
+
+    await expect(response.json()).resolves.toMatchObject({
+      mode: "simulation",
+      mistakeId: "mistake-1",
+      gapSeverity: "normal"
+    });
+    expect(analyzeMistakeMock).toHaveBeenCalledWith({
+      filename: "paper photo.png",
+      subjectHint: "数学",
+      gradeHint: "八年级"
+    });
+    expect(saveAnalysisAsMistakeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        studentId: "default-student",
+        imagePath: expect.stringMatching(/^uploads\/\d+-paper_photo\.png$/),
+        analysis
+      })
+    );
+  });
+
+  it("rejects analyze requests without an uploaded file", async () => {
+    const { POST } = await import("@/app/api/analyze/route");
+
+    const response = await POST({ formData: async () => new FormData() } as Request);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "请先上传一张试卷或习题照片。" });
+  });
+
+  it("stores study chat messages for a mistake", async () => {
+    const { POST } = await import("@/app/api/chat/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ mistakeId: "mistake-1", message: "这道数学题怎么做？" })
+      })
+    );
+
+    const body = await response.json();
+    expect(body.blocked).toBe(false);
+    expect(body.reply).toContain("这道数学题怎么做？");
+    expect(prismaMock.tutorMessage.createMany).toHaveBeenCalledWith({
+      data: [
+        { mistakeId: "mistake-1", role: "user", content: "这道数学题怎么做？" },
+        { mistakeId: "mistake-1", role: "assistant", content: body.reply }
+      ]
+    });
+  });
+
+  it("blocks non-study chat and logs the request", async () => {
+    const { POST } = await import("@/app/api/chat/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "推荐一个游戏" })
+      })
+    );
+
+    expect(await response.json()).toMatchObject({ blocked: true });
+    expect(prismaMock.nonStudyRequestLog.create).toHaveBeenCalledWith({
+      data: {
+        studentId: "default-student",
+        contentSummary: "推荐一个游戏",
+        category: "game"
+      }
+    });
+  });
+
+  it("lists mistakes with optional subject and grade filters", async () => {
+    prismaMock.mistake.findMany.mockResolvedValue([{ id: "mistake-1" }]);
+    const { GET } = await import("@/app/api/mistakes/route");
+
+    const response = await GET(new Request("http://localhost/api/mistakes?subject=数学&grade=八年级"));
+
+    expect(await response.json()).toEqual({ mistakes: [{ id: "mistake-1" }] });
+    expect(prismaMock.mistake.findMany).toHaveBeenCalledWith({
+      where: { studentId: "default-student", subject: "数学", grade: "八年级" },
+      include: { mistakeArchetypes: { include: { archetype: true } } },
+      orderBy: { createdAt: "desc" }
+    });
+  });
+
+  it("returns a mistake detail by awaited route params", async () => {
+    prismaMock.mistake.findUnique.mockResolvedValue({ id: "mistake-1" });
+    const { GET } = await import("@/app/api/mistakes/[id]/route");
+
+    const response = await GET(new Request("http://localhost/api/mistakes/mistake-1"), {
+      params: Promise.resolve({ id: "mistake-1" })
+    });
+
+    expect(await response.json()).toEqual({ mistake: { id: "mistake-1" } });
+    expect(prismaMock.mistake.findUnique).toHaveBeenCalledWith({
+      where: { id: "mistake-1" },
+      include: {
+        tutorMessages: { orderBy: { createdAt: "asc" } },
+        mistakeArchetypes: { include: { archetype: true } }
+      }
+    });
+  });
+
+  it("orders knowledge gaps by severity rank and recency", async () => {
+    prismaMock.knowledgeGap.findMany.mockResolvedValue([{ id: "gap-1" }]);
+    const { GET } = await import("@/app/api/knowledge-gaps/route");
+
+    const response = await GET();
+
+    expect(await response.json()).toEqual({ gaps: [{ id: "gap-1" }] });
+    expect(prismaMock.knowledgeGap.findMany).toHaveBeenCalledWith({
+      where: { studentId: "default-student" },
+      include: { knowledgePoint: true },
+      orderBy: [{ severityRank: "desc" }, { lastOccurredAt: "desc" }]
+    });
+  });
+
+  it("builds the filtered knowledge tree", async () => {
+    prismaMock.knowledgePoint.findMany.mockResolvedValue([
+      { id: "point-1", name: "一次函数", parentId: null, chapter: "函数", sortOrder: 1 }
+    ]);
+    prismaMock.knowledgeGap.findMany.mockResolvedValue([
+      { knowledgePointId: "point-1", severity: "weak", errorCount: 2, repeatedArchetypeCount: 1 }
+    ]);
+    const { GET } = await import("@/app/api/knowledge-tree/route");
+
+    const response = await GET(new Request("http://localhost/api/knowledge-tree?subject=数学&grade=八年级"));
+
+    expect(await response.json()).toMatchObject({
+      grade: "八年级",
+      subject: "数学",
+      tree: [{ id: "point-1", severity: "weak", errorCount: 2 }]
+    });
+    expect(prismaMock.knowledgePoint.findMany).toHaveBeenCalledWith({
+      where: { grade: "八年级", subject: "数学" },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
+    });
+    expect(prismaMock.knowledgeGap.findMany).toHaveBeenCalledWith({
+      where: {
+        studentId: "default-student",
+        knowledgePoint: { grade: "八年级", subject: "数学" }
+      }
+    });
+  });
+});
