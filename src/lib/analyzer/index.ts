@@ -6,5 +6,6 @@ export async function analyzeMistake(input: AnalyzeInput): Promise<{ mode: "api"
     return { mode: "simulation", analysis: await analyzeWithSimulation(input) };
   }
 
+  // Keep the API-key path deterministic until the real vision analyzer is wired in.
   return { mode: "simulation", analysis: await analyzeWithSimulation(input) };
 }
