@@ -96,8 +96,10 @@ function buildPrompt(input: AnalyzeInput) {
     "practiceQuestions 给 1 到 3 道同类练习，必须是对象数组，每道包含 question, answer, hint。",
     "不要用省略号，不要用字符串替代对象，不要输出 <think>。",
     "讲解要适合孩子阅读，深入浅出，但不要涉及游戏、娱乐网站、闲聊内容。",
-    "如果用户未提供学科或年级，请根据图片内容自动判断，不要默认八年级数学。",
-    `用户提示学科：${input.subjectHint ?? "未提供，请自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请自动识别"}；文件名：${input.filename}。`
+    "如果用户未提供学科或年级，请根据图片文字、题型、章节和知识点自动判断。",
+    "年级判断优先看图片中的明确文字：初一/七年级/7年级/Grade 7 => 七年级；初二/八年级/8年级/Grade 8 => 八年级；初三/九年级/9年级/Grade 9 => 九年级。",
+    "如果图片没有明确年级文字，再根据教材章节和题目难度推断；不要因为示例、学生档案或系统默认值选择八年级数学。",
+    `用户提示学科：${input.subjectHint ?? "未提供，请根据图片自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请根据图片自动识别"}；文件名：${input.filename}。`
   ].join("\n");
 }
 
@@ -111,7 +113,10 @@ function buildRepairPrompt(content: string, input: AnalyzeInput) {
     "knowledgePoints 必须是对象数组，格式如 [{\"name\":\"知识点\",\"confidence\":0.8}]。",
     "archetype 必须是对象，包含 title, pattern, solutionTemplate, commonTraps。",
     "practiceQuestions 必须是对象数组，每项包含 question, answer, hint。",
-    `用户提示学科：${input.subjectHint ?? "未提供，请自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请自动识别"}；文件名：${input.filename}。`,
+    "如果用户未提供学科或年级，请根据原始内容和图片信息自动判断。",
+    "年级判断优先看图片中的明确文字：初一/七年级/7年级/Grade 7 => 七年级；初二/八年级/8年级/Grade 8 => 八年级；初三/九年级/9年级/Grade 9 => 九年级。",
+    "如果没有明确年级文字，再根据教材章节和题目难度推断；不要因为示例、学生档案或系统默认值选择八年级数学。",
+    `用户提示学科：${input.subjectHint ?? "未提供，请根据图片自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请根据图片自动识别"}；文件名：${input.filename}。`,
     "原始内容：",
     content
   ].join("\n");

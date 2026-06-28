@@ -44,11 +44,11 @@ describe("simulated analyzer", () => {
     expect(result.practiceQuestions).toHaveLength(3);
   });
 
-  it("defaults missing hints to junior-high math", async () => {
+  it("uses a neutral sample when hints are missing in simulation mode", async () => {
     const result = await analyzeWithSimulation({ filename: "worksheet.png" });
 
-    expect(result.subject).toBe("数学");
-    expect(result.grade).toBe("八年级");
+    expect(result.subject).toBe("英语");
+    expect(result.grade).toBe("七年级");
   });
 
   it("uses MiniMax mode when a MiniMax key and image bytes are present", async () => {
@@ -114,6 +114,36 @@ describe("simulated analyzer", () => {
       .filter((item) => item.type === "image_url")
       .map((item) => item.image_url?.url);
     expect(imageUrls).toEqual(["data:image/png;base64,first-image", "data:image/jpeg;base64,second-image"]);
+  });
+
+  it("asks MiniMax to infer missing subject and grade from image evidence without hidden defaults", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({ ...minimaxAnalysis, subject: "英语", grade: "七年级" }) } }]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await analyzeMistake({
+      filename: "grade-7-english.png",
+      mimeType: "image/png",
+      imageBase64: "image-bytes"
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as {
+      messages: Array<{ content: Array<{ type: string; text?: string }> }>;
+    };
+    const prompt = requestBody.messages[0].content.find((item) => item.type === "text")?.text ?? "";
+    expect(prompt).toContain("初一/七年级/7年级/Grade 7");
+    expect(prompt).toContain("不要因为示例、学生档案或系统默认值选择八年级数学");
+    expect(prompt).toContain("用户提示学科：未提供，请根据图片自动识别");
+    expect(prompt).toContain("用户提示年级：未提供，请根据图片自动识别");
+    expect(prompt).not.toContain("用户提示学科：数学");
+    expect(prompt).not.toContain("用户提示年级：八年级");
   });
 
   it("allows overriding the MiniMax base URL for compatible deployments", async () => {

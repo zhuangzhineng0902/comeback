@@ -60,7 +60,7 @@ describe("mistake repository", () => {
   });
 
   it("stores an analysis and creates a knowledge gap", async () => {
-    const analysis = await analyzeWithSimulation({ filename: "a.png" });
+    const analysis = await analyzeWithSimulation({ filename: "a.png", subjectHint: "数学", gradeHint: "八年级" });
     const result = await saveAnalysisAsMistake({
       studentId: "default-student",
       imagePath: "uploads/a.png",
