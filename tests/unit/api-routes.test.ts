@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,6 +26,7 @@ const analyzeMistakeMock = vi.fn();
 const saveAnalysisAsMistakeMock = vi.fn();
 const prismaMock = {
   mistake: {
+    findFirst: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn()
   },
@@ -57,7 +58,15 @@ vi.mock("@/lib/db", () => ({
 
 describe("api routes", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    analyzeMistakeMock.mockReset();
+    saveAnalysisAsMistakeMock.mockReset();
+    prismaMock.mistake.findFirst.mockReset();
+    prismaMock.mistake.findMany.mockReset();
+    prismaMock.mistake.findUnique.mockReset();
+    prismaMock.knowledgeGap.findMany.mockReset();
+    prismaMock.knowledgePoint.findMany.mockReset();
+    prismaMock.nonStudyRequestLog.create.mockReset();
+    prismaMock.tutorMessage.createMany.mockReset();
   });
 
   afterEach(async () => {
@@ -96,7 +105,7 @@ describe("api routes", () => {
     expect(saveAnalysisAsMistakeMock).toHaveBeenCalledWith(
       expect.objectContaining({
         studentId: "default-student",
-        imagePath: expect.stringMatching(/^uploads\/\d+-paper_photo\.png$/),
+        imagePath: expect.stringMatching(/^uploads\/[0-9a-f-]+-paper_photo\.png$/),
         analysis
       })
     );
@@ -111,7 +120,57 @@ describe("api routes", () => {
     await expect(response.json()).resolves.toEqual({ error: "请先上传一张试卷或习题照片。" });
   });
 
+  it("rejects non-image uploads before analysis", async () => {
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    formData.set("file", new File(["not-image"], "notes.txt", { type: "text/plain" }));
+
+    const response = await POST({ formData: async () => formData } as Request);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "请上传 JPG、PNG、WebP 或 HEIC 格式的图片。" });
+    expect(analyzeMistakeMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized image uploads before buffering", async () => {
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    const file = new File(["image-bytes"], "large.png", { type: "image/png" });
+    Object.defineProperty(file, "size", { value: 8 * 1024 * 1024 + 1 });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: vi.fn(async () => new TextEncoder().encode("image-bytes").buffer)
+    });
+    formData.set("file", file);
+
+    const response = await POST({ formData: async () => formData } as Request);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "图片不能超过 8MB，请压缩后再上传。" });
+    expect(file.arrayBuffer).not.toHaveBeenCalled();
+    expect(analyzeMistakeMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes uploaded files when analysis persistence fails", async () => {
+    analyzeMistakeMock.mockResolvedValue({ mode: "simulation", analysis });
+    saveAnalysisAsMistakeMock.mockRejectedValue(new Error("database unavailable"));
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    const file = new File(["image-bytes"], "paper.png", { type: "image/png" });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new TextEncoder().encode("image-bytes").buffer
+    });
+    formData.set("file", file);
+
+    const response = await POST({ formData: async () => formData } as Request);
+    const files = await readdir(path.join(process.cwd(), "uploads"));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: "分析失败，请稍后重试。" });
+    expect(files).toEqual([]);
+  });
+
   it("stores study chat messages for a mistake", async () => {
+    prismaMock.mistake.findFirst.mockResolvedValue({ id: "mistake-1" });
     const { POST } = await import("@/app/api/chat/route");
 
     const response = await POST(
@@ -124,12 +183,83 @@ describe("api routes", () => {
     const body = await response.json();
     expect(body.blocked).toBe(false);
     expect(body.reply).toContain("这道数学题怎么做？");
+    expect(prismaMock.mistake.findFirst).toHaveBeenCalledWith({
+      where: { id: "mistake-1", studentId: "default-student" }
+    });
     expect(prismaMock.tutorMessage.createMany).toHaveBeenCalledWith({
       data: [
         { mistakeId: "mistake-1", role: "user", content: "这道数学题怎么做？" },
         { mistakeId: "mistake-1", role: "assistant", content: body.reply }
       ]
     });
+  });
+
+  it("returns 404 for an invalid mistake id without storing chat messages", async () => {
+    prismaMock.mistake.findFirst.mockResolvedValue(null);
+    const { POST } = await import("@/app/api/chat/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ mistakeId: "missing-mistake", message: "这道数学题怎么做？" })
+      })
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "错题不存在。" });
+    expect(prismaMock.mistake.findFirst).toHaveBeenCalledWith({
+      where: { id: "missing-mistake", studentId: "default-student" }
+    });
+    expect(prismaMock.tutorMessage.createMany).not.toHaveBeenCalled();
+  });
+
+  it("checks supplied mistake ids before blocking non-study chat", async () => {
+    prismaMock.mistake.findFirst.mockResolvedValue(null);
+    const { POST } = await import("@/app/api/chat/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ mistakeId: "missing-mistake", message: "推荐一个游戏" })
+      })
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "错题不存在。" });
+    expect(prismaMock.nonStudyRequestLog.create).not.toHaveBeenCalled();
+    expect(prismaMock.tutorMessage.createMany).not.toHaveBeenCalled();
+  });
+
+  it("allows study chat without a mistake id and skips persistence", async () => {
+    const { POST } = await import("@/app/api/chat/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ message: "这道数学题怎么做？" })
+      })
+    );
+
+    const body = await response.json();
+    expect(body.blocked).toBe(false);
+    expect(body.reply).toContain("这道数学题怎么做？");
+    expect(prismaMock.mistake.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.tutorMessage.createMany).not.toHaveBeenCalled();
+  });
+
+  it("returns a clean error for malformed chat JSON", async () => {
+    const { POST } = await import("@/app/api/chat/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        body: "{not-json"
+      })
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "请求格式不正确。" });
+    expect(prismaMock.tutorMessage.createMany).not.toHaveBeenCalled();
   });
 
   it("blocks non-study chat and logs the request", async () => {
