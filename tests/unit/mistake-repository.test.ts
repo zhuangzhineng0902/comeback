@@ -82,4 +82,28 @@ describe("mistake repository", () => {
     expect(second.gap.severity).toBe("repeated_archetype");
     expect(second.gap.severityRank).toBe(3);
   });
+
+  it("marks three mistakes on one knowledge point as important without repeated archetypes", async () => {
+    const analysis = await analyzeWithSimulation({ filename: "a.png" });
+    const analyses = ["母题 A", "母题 B", "母题 C"].map((title) => ({
+      ...analysis,
+      archetype: {
+        ...analysis.archetype,
+        title
+      }
+    }));
+
+    await saveAnalysisAsMistake({ studentId: "default-student", imagePath: "uploads/a.png", analysis: analyses[0] });
+    await saveAnalysisAsMistake({ studentId: "default-student", imagePath: "uploads/b.png", analysis: analyses[1] });
+    const third = await saveAnalysisAsMistake({
+      studentId: "default-student",
+      imagePath: "uploads/c.png",
+      analysis: analyses[2]
+    });
+
+    expect(third.gap.errorCount).toBe(3);
+    expect(third.gap.repeatedArchetypeCount).toBe(1);
+    expect(third.gap.severity).toBe("important");
+    expect(third.gap.severityRank).toBe(2);
+  });
 });
