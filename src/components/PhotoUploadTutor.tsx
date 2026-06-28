@@ -1,6 +1,6 @@
 "use client";
 
-import { Send, Upload } from "lucide-react";
+import { LoaderCircle, Send, Upload } from "lucide-react";
 import React, { useState } from "react";
 
 import { AnalysisCard } from "@/components/AnalysisCard";
@@ -187,6 +187,19 @@ export function PhotoUploadTutor() {
               </select>
             </label>
           </div>
+
+          {isAnalyzing ? (
+            <div
+              role="status"
+              className="mt-4 flex items-start gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950"
+            >
+              <LoaderCircle aria-hidden="true" className="mt-0.5 animate-spin text-sky-700" size={18} />
+              <div>
+                <p className="font-medium">AI 正在识别照片并整理错因，通常需要 15-30 秒。</p>
+                <p className="mt-1 text-sky-800">请保持页面打开，完成后会自动生成讲解、母题和练习。</p>
+              </div>
+            </div>
+          ) : null}
 
           {error ? <p className="mt-3 text-sm text-rose-600">{error}</p> : null}
         </div>
