@@ -39,7 +39,13 @@ export async function POST(request: Request) {
   await writeFile(absoluteImagePath, bytes);
 
   try {
-    const result = await analyzeMistake({ filename: file.name, subjectHint: subject, gradeHint: grade });
+    const result = await analyzeMistake({
+      filename: file.name,
+      mimeType: file.type,
+      imageBase64: bytes.toString("base64"),
+      subjectHint: subject,
+      gradeHint: grade
+    });
     const saved = await saveAnalysisAsMistake({
       studentId: "default-student",
       imagePath,

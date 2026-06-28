@@ -99,6 +99,8 @@ describe("api routes", () => {
     });
     expect(analyzeMistakeMock).toHaveBeenCalledWith({
       filename: "paper photo.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64"),
       subjectHint: "数学",
       gradeHint: "八年级"
     });

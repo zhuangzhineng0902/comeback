@@ -2,6 +2,8 @@ import type { AnalysisOutput, Grade, Subject } from "@/lib/types";
 
 export type AnalyzeInput = {
   filename: string;
+  mimeType?: string;
+  imageBase64?: string;
   subjectHint?: Subject;
   gradeHint?: Grade;
 };
