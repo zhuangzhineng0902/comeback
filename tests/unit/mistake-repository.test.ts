@@ -1,6 +1,41 @@
+import { spawnSync } from "node:child_process";
+import { existsSync, unlinkSync } from "node:fs";
+import { createRequire } from "node:module";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-process.env.DATABASE_URL ??= "file:./dev.db";
+const require = createRequire(import.meta.url);
+const prismaCli = require.resolve("prisma/build/index.js");
+const tsxCli = require.resolve("tsx/cli");
+const databaseUrl = "file:./test-mistake-repository.db";
+const databaseFiles = ["prisma/test-mistake-repository.db", "prisma/test-mistake-repository.db-journal"];
+
+process.env.DATABASE_URL = databaseUrl;
+
+function runSetupCommand(command: string, args: string[]) {
+  const env = { ...process.env, DATABASE_URL: databaseUrl };
+  delete env.RUST_LOG;
+
+  const result = spawnSync(process.execPath, [command, ...args], {
+    cwd: process.cwd(),
+    env,
+    stdio: "inherit"
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`Test database setup failed: ${command} ${args.join(" ")}`);
+  }
+}
+
+function resetTestDatabase() {
+  for (const file of databaseFiles) {
+    if (existsSync(file)) {
+      unlinkSync(file);
+    }
+  }
+
+  runSetupCommand(prismaCli, ["migrate", "deploy"]);
+  runSetupCommand(tsxCli, ["prisma/seed.ts"]);
+}
 
 describe("mistake repository", () => {
   let prisma: typeof import("@/lib/db").prisma;
@@ -8,6 +43,8 @@ describe("mistake repository", () => {
   let saveAnalysisAsMistake: typeof import("@/lib/repositories/mistakes").saveAnalysisAsMistake;
 
   beforeAll(async () => {
+    resetTestDatabase();
+
     [{ prisma }, { analyzeWithSimulation }, { saveAnalysisAsMistake }] = await Promise.all([
       import("@/lib/db"),
       import("@/lib/analyzer/simulated"),
