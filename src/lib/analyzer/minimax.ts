@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AnalyzeInput } from "@/lib/analyzer/simulated";
 import { grades, subjects, type AnalysisOutput } from "@/lib/types";
 
-const minimaxEndpoint = "https://api.minimax.io/v1/chat/completions";
+const defaultMiniMaxBaseUrl = "https://api.minimaxi.com/v1";
 const defaultModel = "MiniMax-M3";
 
 const analysisSchema = z.object({
@@ -68,8 +68,9 @@ export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisO
     throw new Error("MiniMax analysis requires MINIMAX_API_KEY and image data.");
   }
 
+  const baseUrl = (process.env.MINIMAX_BASE_URL ?? defaultMiniMaxBaseUrl).replace(/\/+$/, "");
   const dataUrl = `data:${input.mimeType};base64,${input.imageBase64}`;
-  const response = await fetch(minimaxEndpoint, {
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,

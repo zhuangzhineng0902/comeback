@@ -73,7 +73,7 @@ describe("simulated analyzer", () => {
     expect(result.mode).toBe("api");
     expect(result.analysis.questionType).toBe("一次函数应用题");
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.minimax.io/v1/chat/completions",
+      "https://api.minimaxi.com/v1/chat/completions",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -82,6 +82,28 @@ describe("simulated analyzer", () => {
         })
       })
     );
+  });
+
+  it("allows overriding the MiniMax base URL for compatible deployments", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    process.env.MINIMAX_BASE_URL = "https://example.test/v1";
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(minimaxAnalysis) } }]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("https://example.test/v1/chat/completions", expect.any(Object));
   });
 
   it("falls back to simulation when MiniMax returns unparseable content", async () => {
