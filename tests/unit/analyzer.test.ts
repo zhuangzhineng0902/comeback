@@ -199,6 +199,36 @@ describe("simulated analyzer", () => {
     expect(result.analysis.practiceQuestions[0].question).toBe("一次函数 y=-x+5 的图像经过哪些象限？");
   });
 
+  it("parses the first complete JSON object when MiniMax appends extra text", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: `${JSON.stringify(minimaxAnalysis)}\n补充说明：这不是 JSON。示例 {不要解析这里}`
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.mode).toBe("api");
+    expect(result.analysis.questionType).toBe("一次函数应用题");
+  });
+
   it("repairs non-JSON MiniMax content with a second text-only request", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     const fetchMock = vi

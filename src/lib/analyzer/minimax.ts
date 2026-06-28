@@ -45,13 +45,42 @@ function stripJsonFence(content: string) {
 function extractJsonObject(content: string) {
   const stripped = stripJsonFence(content);
   const start = stripped.indexOf("{");
-  const end = stripped.lastIndexOf("}");
 
-  if (start === -1 || end === -1 || end <= start) {
+  if (start === -1) {
     return stripped;
   }
 
-  return stripped.slice(start, end + 1);
+  let depth = 0;
+  let isInsideString = false;
+  let isEscaped = false;
+
+  for (let index = start; index < stripped.length; index += 1) {
+    const char = stripped[index];
+
+    if (isInsideString) {
+      if (isEscaped) {
+        isEscaped = false;
+      } else if (char === "\\") {
+        isEscaped = true;
+      } else if (char === "\"") {
+        isInsideString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      isInsideString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return stripped.slice(start, index + 1);
+      }
+    }
+  }
+
+  return stripped.slice(start);
 }
 
 function buildPrompt(input: AnalyzeInput) {
