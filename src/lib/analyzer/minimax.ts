@@ -152,6 +152,9 @@ function buildRepairPrompt(content: string, input: AnalyzeInput) {
   return [
     "请把下面这段错题分析内容转换成严格 JSON。",
     "只输出 JSON 对象，不要 Markdown，不要 <think>，不要解释。",
+    "不要修补原文字符，请根据原始内容重新生成完整 JSON 对象。",
+    "所有 JSON 属性名必须使用英文双引号，所有字符串也必须使用英文双引号。",
+    "禁止输出 JavaScript 对象、单引号、尾随逗号、注释或任何 JSON 之外的文字。",
     "JSON 字段必须是：subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation。",
     "subject 必须是：语文、数学、英语、物理、化学、生物、历史、地理、道德与法治之一。",
     "grade 必须是：七年级、八年级、九年级之一。",
@@ -311,6 +314,7 @@ async function repairMiniMaxContent(input: {
           content: buildRepairPrompt(input.content, input.analyzeInput)
         }
       ],
+      thinking: { type: "disabled" },
       temperature: 0,
       max_tokens: 4000
     }
@@ -345,6 +349,7 @@ export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisO
           ]
         }
       ],
+      thinking: { type: "disabled" },
       temperature: 0.2,
       max_tokens: 4000
     }

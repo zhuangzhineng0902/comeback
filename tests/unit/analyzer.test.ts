@@ -241,8 +241,10 @@ describe("simulated analyzer", () => {
     });
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as {
+      thinking?: { type?: string };
       messages: Array<{ content: Array<{ type: string; image_url?: { url: string } }> }>;
     };
+    expect(requestBody.thinking).toEqual({ type: "disabled" });
     const imageUrls = requestBody.messages[0].content
       .filter((item) => item.type === "image_url")
       .map((item) => item.image_url?.url);
@@ -437,9 +439,13 @@ describe("simulated analyzer", () => {
     expect(result.analysis.questionType).toBe("一次函数应用题");
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const repairBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)) as {
+      thinking?: { type?: string };
       messages: Array<{ content: string }>;
     };
+    expect(repairBody.thinking).toEqual({ type: "disabled" });
     expect(repairBody.messages[0].content).toContain("转换成严格 JSON");
+    expect(repairBody.messages[0].content).toContain("所有 JSON 属性名必须使用英文双引号");
+    expect(repairBody.messages[0].content).toContain("重新生成完整 JSON 对象");
   });
 
   it("repairs rich explanations with malformed illustration types instead of dropping them", async () => {
