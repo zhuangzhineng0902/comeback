@@ -174,6 +174,24 @@ function buildRepairPrompt(content: string, input: AnalyzeInput) {
   ].join("\n");
 }
 
+function splitMiniMaxList(value: string, primarySeparators?: RegExp) {
+  const separators = primarySeparators ?? /→|->|=>|、|，|,|;|；|\r?\n/g;
+  const parts = value
+    .split(separators)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return parts.length > 0 ? parts : [value.trim()].filter(Boolean);
+}
+
+function normalizeStringListField(record: Record<string, unknown>, key: string, primarySeparators?: RegExp) {
+  const value = record[key];
+
+  if (typeof value === "string") {
+    record[key] = splitMiniMaxList(value, primarySeparators);
+  }
+}
+
 function normalizeAnalysisShape(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return value;
@@ -222,6 +240,16 @@ function normalizeAnalysisShape(value: unknown): unknown {
         }
         return step;
       });
+    }
+
+    if (rich.treeContext && typeof rich.treeContext === "object" && !Array.isArray(rich.treeContext)) {
+      const treeContext = { ...(rich.treeContext as Record<string, unknown>) };
+      normalizeStringListField(treeContext, "path", /→|->|=>|、|，|,|;|；|\r?\n/g);
+      normalizeStringListField(treeContext, "prerequisites");
+      normalizeStringListField(treeContext, "current");
+      normalizeStringListField(treeContext, "next");
+      normalizeStringListField(treeContext, "confusions");
+      rich.treeContext = treeContext;
     }
 
     if (rich.illustration && typeof rich.illustration === "object" && !Array.isArray(rich.illustration)) {

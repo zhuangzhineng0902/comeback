@@ -164,6 +164,60 @@ describe("simulated analyzer", () => {
     expect(result.analysis.richExplanation?.shenzhenExample.label).toBe("深圳题型风格");
   });
 
+  it("normalizes rich tree context strings returned by MiniMax", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    ...minimaxAnalysis,
+                    richExplanation: {
+                      ...richExplanation,
+                      treeContext: {
+                        path: "英语 → 七年级 → 语法 → There be 句型 → 就近原则",
+                        prerequisites: "名词单复数、be 动词 is/are",
+                        current: "There be 句型就近原则",
+                        next: "主谓一致；倒装句识别",
+                        confusions: "只看最后一个名词\n忽略离 be 最近的主语"
+                      }
+                    }
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "grade-7-english.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.analysis.richExplanation?.treeContext.path).toEqual([
+      "英语",
+      "七年级",
+      "语法",
+      "There be 句型",
+      "就近原则"
+    ]);
+    expect(result.analysis.richExplanation?.treeContext.prerequisites).toEqual(["名词单复数", "be 动词 is/are"]);
+    expect(result.analysis.richExplanation?.treeContext.current).toEqual(["There be 句型就近原则"]);
+    expect(result.analysis.richExplanation?.treeContext.next).toEqual(["主谓一致", "倒装句识别"]);
+    expect(result.analysis.richExplanation?.treeContext.confusions).toEqual([
+      "只看最后一个名词",
+      "忽略离 be 最近的主语"
+    ]);
+  });
+
   it("sends every uploaded image to MiniMax", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     const fetchMock = vi.fn(async () =>
