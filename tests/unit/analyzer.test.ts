@@ -75,6 +75,9 @@ describe("simulated analyzer", () => {
     expect(result.knowledgePoints[0].name).toBe("一次函数图像与性质");
     expect(result.archetype.title).toBe("一次函数图像性质判断母题");
     expect(result.practiceQuestions).toHaveLength(3);
+    expect(result.richExplanation?.diagnosis).toContain("截距");
+    expect(result.richExplanation?.treeContext.path).toContain("一次函数图像与性质");
+    expect(result.richExplanation?.illustration?.type).toBe("flow");
   });
 
   it("uses a neutral sample when hints are missing in simulation mode", async () => {
@@ -82,6 +85,8 @@ describe("simulated analyzer", () => {
 
     expect(result.subject).toBe("英语");
     expect(result.grade).toBe("七年级");
+    expect(result.richExplanation?.diagnosis).toContain("a book");
+    expect(result.richExplanation?.shenzhenExample.label).toBe("深圳题型风格");
   });
 
   it("uses MiniMax mode when a MiniMax key and image bytes are present", async () => {

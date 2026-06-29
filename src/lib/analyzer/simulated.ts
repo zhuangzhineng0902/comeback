@@ -52,7 +52,39 @@ export async function analyzeWithSimulation(input: AnalyzeInput): Promise<Analys
           answer: "第二、三、四象限",
           hint: "k < 0 表示图像下降，b < 0 表示交 y 轴负半轴。"
         }
-      ]
+      ],
+      richExplanation: {
+        diagnosis: "这道题的核心漏洞是只看截距 b，没有结合斜率 k 判断图像方向。",
+        analogy: "一次函数图像像一条斜坡路，k 决定路往上还是往下，b 决定它从 y 轴哪里出发。",
+        walkthrough: [
+          { title: "先看 k", body: "k = 2 大于 0，所以图像从左到右上升。" },
+          { title: "再看 b", body: "b = -3，说明图像和 y 轴交在负半轴。" },
+          { title: "合并判断", body: "上升且从负半轴出发，会经过第三、第四、第一象限。" }
+        ],
+        wrongAnswerInsight: "只看 b = -3 时，很容易误以为图像只和第四象限有关。",
+        treeContext: {
+          path: ["数学", grade, "一次函数", "一次函数图像与性质", "象限判断"],
+          prerequisites: ["平面直角坐标系", "正比例函数图像", "k 与 b 的意义"],
+          current: ["一次函数 y = kx + b 图像性质"],
+          next: ["一次函数与方程", "一次函数实际应用"],
+          confusions: ["只看 b 不看 k", "把上升和下降方向记反"]
+        },
+        illustration: {
+          type: "flow",
+          title: "一次函数象限判断顺序",
+          nodes: [
+            { label: "k = 2", detail: "大于 0，图像上升", tone: "focus" },
+            { label: "b = -3", detail: "交 y 轴负半轴", tone: "warning" },
+            { label: "合并", detail: "三、四、一象限" }
+          ]
+        },
+        shenzhenExample: {
+          label: "深圳题型风格",
+          question: "已知一次函数 y = -2x + 4，判断它经过哪些象限。",
+          answer: "第一、二、四象限",
+          explanation: "k < 0 表示图像下降，b > 0 表示交 y 轴正半轴，所以经过第一、二、四象限。"
+        }
+      }
     };
   }
 
@@ -90,6 +122,39 @@ export async function analyzeWithSimulation(input: AnalyzeInput): Promise<Analys
         answer: "is",
         hint: "water 是不可数名词，按单数处理。"
       }
-    ]
+    ],
+    richExplanation: {
+      diagnosis: "这道题错在只看到了 two pens，没有看离 be 动词最近的 a book。",
+      analogy: "There be 就像排队点名，be 动词只听离自己最近的同学回答。",
+      walkthrough: [
+        { title: "找最近名词", body: "空格后最近的是 a book。" },
+        { title: "判断单复数", body: "a book 是单数，所以用 is。" },
+        { title: "排除干扰", body: "two pens 虽然是复数，但离 be 更远，不决定答案。" }
+      ],
+      wrongAnswerInsight: "B. are 很诱人，是因为 two pens 是复数，但这道题考的是就近原则。",
+      treeContext: {
+        path: ["英语", grade, "语法", "There be 句型", "就近原则"],
+        prerequisites: ["名词单复数", "be 动词 is/are"],
+        current: ["There be 句型就近原则"],
+        next: ["主谓一致", "倒装句识别"],
+        confusions: ["只看最后一个名词", "把 there 当成真正主语"]
+      },
+      illustration: {
+        type: "flow",
+        title: "be 动词看最近名词",
+        nodes: [
+          { label: "There", detail: "句型开头" },
+          { label: "is", detail: "由最近名词决定", tone: "focus" },
+          { label: "a book", detail: "最近且单数", tone: "warning" },
+          { label: "two pens", detail: "更远，不决定 be" }
+        ]
+      },
+      shenzhenExample: {
+        label: "深圳题型风格",
+        question: "There ____ two books and a ruler on the desk.",
+        answer: "are",
+        explanation: "离空格最近的是 two books，是复数，所以用 are。"
+      }
+    }
   };
 }
