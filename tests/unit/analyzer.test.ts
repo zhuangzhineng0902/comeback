@@ -295,6 +295,46 @@ describe("simulated analyzer", () => {
     expect(result.analysis.richExplanation).toBeUndefined();
   });
 
+  it("drops incomplete optional illustrations while keeping rich explanations", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    ...minimaxAnalysis,
+                    richExplanation: {
+                      ...richExplanation,
+                      illustration: {
+                        type: "flow",
+                        nodes: richExplanation.illustration.nodes
+                      }
+                    }
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.mode).toBe("api");
+    expect(result.analysis.richExplanation?.diagnosis).toContain("a book");
+    expect(result.analysis.richExplanation?.illustration).toBeUndefined();
+  });
+
   it("sends every uploaded image to MiniMax", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     const fetchMock = vi.fn(async () =>

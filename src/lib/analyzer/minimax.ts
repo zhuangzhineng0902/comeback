@@ -259,7 +259,19 @@ function normalizeAnalysisShape(value: unknown): unknown {
     }
 
     if (rich.illustration && typeof rich.illustration === "object" && !Array.isArray(rich.illustration)) {
-      rich.illustration = { ...(rich.illustration as Record<string, unknown>) };
+      const illustration = { ...(rich.illustration as Record<string, unknown>) };
+      const type = String(illustration.type);
+      if (["flow", "compare", "treePath"].includes(type)) {
+        const hasTitle = typeof illustration.title === "string" && illustration.title.trim().length > 0;
+        const hasNodes = Array.isArray(illustration.nodes) && illustration.nodes.length > 0;
+        if (hasTitle && hasNodes) {
+          rich.illustration = illustration;
+        } else {
+          delete rich.illustration;
+        }
+      } else {
+        rich.illustration = illustration;
+      }
     }
 
     record.richExplanation = rich;
