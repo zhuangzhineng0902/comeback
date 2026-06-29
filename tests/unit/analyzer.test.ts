@@ -216,6 +216,12 @@ describe("simulated analyzer", () => {
     expect(prompt).toContain("不要因为示例、学生档案或系统默认值选择八年级数学");
     expect(prompt).toContain("用户提示学科：未提供，请根据图片自动识别");
     expect(prompt).toContain("用户提示年级：未提供，请根据图片自动识别");
+    expect(prompt).toContain("richExplanation");
+    expect(prompt).toContain("老师板书式讲解");
+    expect(prompt).toContain("知识树上下文");
+    expect(prompt).toContain("深圳题型风格");
+    expect(prompt).toContain("不要把未核验来源的题目说成深圳真题");
+    expect(prompt).toContain("illustration 只能是结构化数据");
     expect(prompt).not.toContain("用户提示学科：数学");
     expect(prompt).not.toContain("用户提示年级：八年级");
   });
