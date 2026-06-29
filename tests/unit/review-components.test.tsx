@@ -2,11 +2,38 @@ import { render, screen } from "@testing-library/react";
 import React from "react";
 import { describe, expect, it } from "vitest";
 
+import { IllustrationRenderer } from "@/components/IllustrationRenderer";
 import { KnowledgeTreeView } from "@/components/KnowledgeTreeView";
 import { MistakeList } from "@/components/MistakeList";
 import { SeverityBadge } from "@/components/SeverityBadge";
 
 describe("review components", () => {
+  it("renders flow illustrations from structured data", () => {
+    render(
+      <IllustrationRenderer
+        illustration={{
+          type: "flow",
+          title: "be 动词看最近名词",
+          nodes: [
+            { label: "There" },
+            { label: "is", detail: "由最近名词决定", tone: "focus" },
+            { label: "a book", detail: "最近且单数", tone: "warning" }
+          ]
+        }}
+      />
+    );
+
+    expect(screen.getByText("be 动词看最近名词")).toBeTruthy();
+    expect(screen.getByText("There")).toBeTruthy();
+    expect(screen.getByText("由最近名词决定")).toBeTruthy();
+  });
+
+  it("renders nothing when illustration data is missing", () => {
+    const { container } = render(<IllustrationRenderer illustration={undefined} />);
+
+    expect(container.textContent).toBe("");
+  });
+
   it("labels repeated archetype severity as a high-frequency gap", () => {
     render(<SeverityBadge severity="repeated_archetype" />);
 
