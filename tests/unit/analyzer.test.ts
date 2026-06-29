@@ -218,6 +218,83 @@ describe("simulated analyzer", () => {
     ]);
   });
 
+  it("keeps the base analysis when MiniMax omits required rich explanation fields", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    ...minimaxAnalysis,
+                    richExplanation: {
+                      ...richExplanation,
+                      wrongAnswerInsight: undefined
+                    }
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.mode).toBe("api");
+    expect(result.analysis.questionType).toBe("一次函数应用题");
+    expect(result.analysis.richExplanation).toBeUndefined();
+  });
+
+  it("keeps the base analysis when MiniMax returns malformed rich tree context strings", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    ...minimaxAnalysis,
+                    richExplanation: {
+                      ...richExplanation,
+                      treeContext: {
+                        ...richExplanation.treeContext,
+                        path: "知识树位置"
+                      }
+                    }
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.mode).toBe("api");
+    expect(result.analysis.questionType).toBe("一次函数应用题");
+    expect(result.analysis.richExplanation).toBeUndefined();
+  });
+
   it("sends every uploaded image to MiniMax", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     const fetchMock = vi.fn(async () =>

@@ -43,7 +43,7 @@ const richExplanationSchema = z.object({
   })
 });
 
-const analysisSchema = z.object({
+const baseAnalysisSchema = z.object({
   subject: z.enum(subjects),
   grade: z.enum(grades),
   questionType: z.string().min(1),
@@ -62,7 +62,10 @@ const analysisSchema = z.object({
   }),
   practiceQuestions: z
     .array(z.object({ question: z.string().min(1), answer: z.string().min(1), hint: z.string().min(1) }))
-    .min(1),
+    .min(1)
+});
+
+const analysisSchema = baseAnalysisSchema.extend({
   richExplanation: richExplanationSchema.optional()
 });
 
@@ -267,8 +270,19 @@ function normalizeAnalysisShape(value: unknown): unknown {
 
 function parseAnalysis(content: string): AnalysisOutput {
   try {
-    const parsed = JSON.parse(extractJsonObject(content)) as unknown;
-    return analysisSchema.parse(normalizeAnalysisShape(parsed));
+    const normalized = normalizeAnalysisShape(JSON.parse(extractJsonObject(content)) as unknown);
+    const parsed = analysisSchema.safeParse(normalized);
+    if (parsed.success) {
+      return parsed.data;
+    }
+
+    const hasMalformedIllustration = parsed.error.issues.some((issue) => issue.path.join(".").startsWith("richExplanation.illustration"));
+    if (hasMalformedIllustration) {
+      throw parsed.error;
+    }
+
+    const base = baseAnalysisSchema.parse(normalized);
+    return base;
   } catch (error) {
     throw new Error(`MiniMax response could not be parsed: ${error instanceof Error ? error.message : String(error)}`);
   }
