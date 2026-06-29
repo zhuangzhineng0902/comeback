@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import React from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { IllustrationRenderer } from "@/components/IllustrationRenderer";
 import { KnowledgeTreeView } from "@/components/KnowledgeTreeView";
@@ -32,6 +32,56 @@ describe("review components", () => {
     const { container } = render(<IllustrationRenderer illustration={undefined} />);
 
     expect(container.textContent).toBe("");
+  });
+
+  it("does not warn when compare illustrations repeat generated node text", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      render(
+        <IllustrationRenderer
+          illustration={{
+            type: "compare",
+            title: "same generated text",
+            nodes: [
+              { label: "x + y", detail: "same detail" },
+              { label: "x + y", detail: "same detail" }
+            ]
+          }}
+        />
+      );
+
+      expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining("Encountered two children with the same key"), expect.anything());
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("adds wrapping safeguards to generated illustration text", () => {
+    const { container } = render(
+      <IllustrationRenderer
+        illustration={{
+          type: "flow",
+          title: "long generated formula",
+          nodes: [
+            {
+              label: "averyveryveryveryverylongenglishtokenthatshouldwrap",
+              detail: "x=y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y"
+            }
+          ]
+        }}
+      />
+    );
+
+    const node = container.querySelector("[data-illustration-node]");
+    const label = screen.getByText("averyveryveryveryverylongenglishtokenthatshouldwrap");
+    const detail = screen.getByText("x=y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y+y");
+
+    expect(node).toBeTruthy();
+    expect(node?.className ?? "").toContain("min-w-0");
+    expect(node?.className ?? "").toContain("break-words");
+    expect(label.className).toContain("break-words");
+    expect(detail.className).toContain("break-words");
   });
 
   it("labels repeated archetype severity as a high-frequency gap", () => {
