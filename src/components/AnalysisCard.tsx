@@ -1,5 +1,6 @@
 import React from "react";
 
+import { RichExplanationCard } from "@/components/RichExplanationCard";
 import type { AnalysisOutput, GapSeverity } from "@/lib/types";
 
 type AnalysisCardProps = {
@@ -67,11 +68,15 @@ export function AnalysisCard({ analysis, gapSeverity, mode }: AnalysisCardProps)
             <p className="mt-2 text-sm leading-6 text-slate-700">{analysis.mistakeReason}</p>
           </div>
 
-          <div className="rounded-md border border-sky-200 bg-sky-50 p-4">
-            <p className="text-xs font-medium text-sky-700">讲给孩子听</p>
-            <p className="mt-2 text-sm leading-6 text-sky-950">{analysis.studentFriendlyExplanation}</p>
-            <p className="mt-3 text-sm leading-6 text-sky-900">{analysis.example}</p>
-          </div>
+          {analysis.richExplanation ? (
+            <RichExplanationCard explanation={analysis.richExplanation} />
+          ) : (
+            <div className="rounded-md border border-sky-200 bg-sky-50 p-4">
+              <p className="text-xs font-medium text-sky-700">讲给孩子听</p>
+              <p className="mt-2 text-sm leading-6 text-sky-950">{analysis.studentFriendlyExplanation}</p>
+              <p className="mt-3 text-sm leading-6 text-sky-900">{analysis.example}</p>
+            </div>
+          )}
         </section>
 
         <aside className="space-y-4">
