@@ -225,12 +225,7 @@ function normalizeAnalysisShape(value: unknown): unknown {
     }
 
     if (rich.illustration && typeof rich.illustration === "object" && !Array.isArray(rich.illustration)) {
-      const illustration = { ...(rich.illustration as Record<string, unknown>) };
-      if (!["flow", "compare", "treePath"].includes(String(illustration.type))) {
-        delete rich.illustration;
-      } else {
-        rich.illustration = illustration;
-      }
+      rich.illustration = { ...(rich.illustration as Record<string, unknown>) };
     }
 
     record.richExplanation = rich;

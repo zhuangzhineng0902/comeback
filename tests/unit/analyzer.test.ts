@@ -383,6 +383,53 @@ describe("simulated analyzer", () => {
     expect(repairBody.messages[0].content).toContain("转换成严格 JSON");
   });
 
+  it("repairs rich explanations with malformed illustration types instead of dropping them", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    ...minimaxAnalysis,
+                    richExplanation: {
+                      ...richExplanation,
+                      illustration: {
+                        ...richExplanation.illustration,
+                        type: "chart"
+                      }
+                    }
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify({ ...minimaxAnalysis, richExplanation }) } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.analysis.richExplanation?.illustration?.type).toBe("flow");
+  });
+
   it("surfaces MiniMax failures instead of silently falling back when a key is configured", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     vi.stubGlobal(
