@@ -280,6 +280,53 @@ function normalizeAnalysisShape(value: unknown): unknown {
   return record;
 }
 
+function buildRichExplanationFallback(analysis: z.infer<typeof baseAnalysisSchema>): AnalysisOutput["richExplanation"] {
+  const primaryKnowledgePoint = analysis.knowledgePoints[0]?.name ?? analysis.questionType;
+  const firstPractice = analysis.practiceQuestions[0];
+
+  return {
+    diagnosis: analysis.mistakeReason,
+    analogy: analysis.studentFriendlyExplanation,
+    walkthrough: [
+      {
+        title: "先定位题目",
+        body: analysis.recognizedText
+      },
+      {
+        title: "再纠正答案",
+        body: `孩子答案：${analysis.studentAnswer}。正确答案：${analysis.correctAnswer}。`
+      },
+      {
+        title: "最后套母题",
+        body: analysis.archetype.solutionTemplate
+      }
+    ],
+    wrongAnswerInsight: analysis.mistakeReason,
+    treeContext: {
+      path: [analysis.subject, analysis.grade, analysis.questionType, primaryKnowledgePoint],
+      prerequisites: analysis.archetype.commonTraps.slice(0, 3),
+      current: analysis.knowledgePoints.map((point) => point.name),
+      next: [analysis.archetype.title],
+      confusions: analysis.archetype.commonTraps
+    },
+    illustration: {
+      type: "flow",
+      title: "从错因到母题",
+      nodes: [
+        { label: primaryKnowledgePoint, detail: "当前知识点", tone: "focus" },
+        { label: "错因", detail: analysis.mistakeReason, tone: "warning" },
+        { label: "母题", detail: analysis.archetype.title }
+      ]
+    },
+    shenzhenExample: {
+      label: "深圳题型风格",
+      question: firstPractice?.question ?? analysis.example,
+      answer: firstPractice?.answer ?? analysis.correctAnswer,
+      explanation: firstPractice?.hint ?? analysis.archetype.solutionTemplate
+    }
+  };
+}
+
 function parseAnalysis(content: string): AnalysisOutput {
   try {
     const normalized = normalizeAnalysisShape(JSON.parse(extractJsonObject(content)) as unknown);
@@ -294,7 +341,7 @@ function parseAnalysis(content: string): AnalysisOutput {
     }
 
     const base = baseAnalysisSchema.parse(normalized);
-    return base;
+    return { ...base, richExplanation: buildRichExplanationFallback(base) };
   } catch (error) {
     throw new Error(`MiniMax response could not be parsed: ${error instanceof Error ? error.message : String(error)}`);
   }

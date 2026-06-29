@@ -218,7 +218,7 @@ describe("simulated analyzer", () => {
     ]);
   });
 
-  it("keeps the base analysis when MiniMax omits required rich explanation fields", async () => {
+  it("builds a rich fallback when MiniMax omits required rich explanation fields", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     vi.stubGlobal(
       "fetch",
@@ -252,10 +252,12 @@ describe("simulated analyzer", () => {
 
     expect(result.mode).toBe("api");
     expect(result.analysis.questionType).toBe("一次函数应用题");
-    expect(result.analysis.richExplanation).toBeUndefined();
+    expect(result.analysis.richExplanation?.diagnosis).toBe("只看 b，没有看 k。");
+    expect(result.analysis.richExplanation?.treeContext.path).toContain("一次函数图像与性质");
+    expect(result.analysis.richExplanation?.shenzhenExample.label).toBe("深圳题型风格");
   });
 
-  it("keeps the base analysis when MiniMax returns malformed rich tree context strings", async () => {
+  it("builds a rich fallback when MiniMax returns malformed rich tree context strings", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     vi.stubGlobal(
       "fetch",
@@ -292,7 +294,8 @@ describe("simulated analyzer", () => {
 
     expect(result.mode).toBe("api");
     expect(result.analysis.questionType).toBe("一次函数应用题");
-    expect(result.analysis.richExplanation).toBeUndefined();
+    expect(result.analysis.richExplanation?.diagnosis).toBe("只看 b，没有看 k。");
+    expect(result.analysis.richExplanation?.treeContext.path).toContain("一次函数图像与性质");
   });
 
   it("drops incomplete optional illustrations while keeping rich explanations", async () => {
