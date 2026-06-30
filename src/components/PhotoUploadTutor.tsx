@@ -9,8 +9,10 @@ import { grades, subjects, type AnalysisOutput, type GapSeverity, type Grade, ty
 type AnalyzeResponse = {
   mode: "api" | "simulation";
   analysis: AnalysisOutput;
+  analyses?: AnalysisOutput[];
   mistakeId: string;
   gapSeverity: GapSeverity;
+  savedMistakes?: Array<{ mistakeId: string; gapSeverity: GapSeverity }>;
 };
 
 type ChatMessage = {
@@ -72,11 +74,15 @@ export function PhotoUploadTutor() {
       }
 
       const nextResult = data as AnalyzeResponse;
+      const analyses = nextResult.analyses ?? [nextResult.analysis];
       setResult(nextResult);
       setMessages([
         {
           role: "assistant",
-          content: `我已经登记这道${nextResult.analysis.subject}错题，重点看「${nextResult.analysis.knowledgePoints[0]?.name ?? nextResult.analysis.questionType}」。`
+          content:
+            analyses.length === 1
+              ? `我已经登记这道${nextResult.analysis.subject}错题，重点看「${nextResult.analysis.knowledgePoints[0]?.name ?? nextResult.analysis.questionType}」。`
+              : `我已经登记 ${analyses.length} 道错题。先从第 1 题「${analyses[0]?.knowledgePoints[0]?.name ?? analyses[0]?.questionType ?? "错题"}」开始复习。`
         }
       ]);
     } catch {
@@ -231,7 +237,20 @@ export function PhotoUploadTutor() {
         </div>
 
         {result ? (
-          <AnalysisCard analysis={result.analysis} gapSeverity={result.gapSeverity} mode={result.mode} />
+          <div className="space-y-4">
+            {(result.analyses ?? [result.analysis]).map((analysis, index) => (
+              <div key={`${analysis.questionType}-${index}`} className="space-y-2">
+                {(result.analyses?.length ?? 1) > 1 ? (
+                  <p className="text-sm font-medium text-slate-600">第 {index + 1} 道错题</p>
+                ) : null}
+                <AnalysisCard
+                  analysis={analysis}
+                  gapSeverity={result.savedMistakes?.[index]?.gapSeverity ?? result.gapSeverity}
+                  mode={result.mode}
+                />
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="rounded-lg border border-slate-200 bg-white p-5 text-sm leading-6 text-slate-600 shadow-sm">
             上传后会在这里看到题目识别、错因、孩子版讲解、母题模板和练习题。

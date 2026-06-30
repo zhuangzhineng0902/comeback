@@ -2,10 +2,12 @@ import { analyzeWithMiniMax } from "@/lib/analyzer/minimax";
 import { analyzeWithSimulation, type AnalyzeInput } from "@/lib/analyzer/simulated";
 import type { AnalysisOutput } from "@/lib/types";
 
-export async function analyzeMistake(input: AnalyzeInput): Promise<{ mode: "api" | "simulation"; analysis: AnalysisOutput }> {
+export async function analyzeMistake(input: AnalyzeInput): Promise<{ mode: "api" | "simulation"; analysis: AnalysisOutput; analyses: AnalysisOutput[] }> {
   if (process.env.MINIMAX_API_KEY && input.imageBase64 && input.mimeType) {
-    return { mode: "api", analysis: await analyzeWithMiniMax(input) };
+    const analyses = await analyzeWithMiniMax(input);
+    return { mode: "api", analysis: analyses[0], analyses };
   }
 
-  return { mode: "simulation", analysis: await analyzeWithSimulation(input) };
+  const analysis = await analyzeWithSimulation(input);
+  return { mode: "simulation", analysis, analyses: [analysis] };
 }

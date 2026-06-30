@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -55,5 +55,66 @@ describe("PhotoUploadTutor", () => {
     fireEvent.change(input!, { target: { files } });
 
     expect(screen.getByText("一次最多上传 16 张图片。")).toBeTruthy();
+  });
+
+  it("renders every analyzed mistake returned by the upload API", async () => {
+    const baseAnalysis = {
+      subject: "英语",
+      grade: "七年级",
+      questionType: "第一道选择题",
+      recognizedText: "There ____ a book on the desk.",
+      studentAnswer: "are",
+      correctAnswer: "is",
+      knowledgePoints: [{ name: "There be 句型", confidence: 0.9 }],
+      mistakeReason: "没有看最近名词。",
+      studentFriendlyExplanation: "看 be 后最近的名词。",
+      example: "There is a book.",
+      archetype: {
+        title: "There be 母题",
+        pattern: "判断 be 动词",
+        solutionTemplate: "先找最近名词。",
+        commonTraps: ["只看复数名词"]
+      },
+      practiceQuestions: [{ question: "There ____ two books.", answer: "are", hint: "看最近名词。" }]
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            mode: "api",
+            analysis: baseAnalysis,
+            analyses: [
+              baseAnalysis,
+              { ...baseAnalysis, questionType: "第二道填空题", recognizedText: "There ____ two pens." }
+            ],
+            mistakeId: "mistake-1",
+            gapSeverity: "normal",
+            savedMistakes: [
+              { mistakeId: "mistake-1", gapSeverity: "normal" },
+              { mistakeId: "mistake-2", gapSeverity: "important" }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+    const { container } = render(<PhotoUploadTutor />);
+    const input = container.querySelector("input[type='file']");
+
+    fireEvent.change(input!, {
+      target: {
+        files: [new File(["image"], "试卷.png", { type: "image/png" })]
+      }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "开始分析" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("第 1 道错题")).toBeTruthy();
+      expect(screen.getByText("第 2 道错题")).toBeTruthy();
+    });
+    expect(screen.getByText("第一道选择题")).toBeTruthy();
+    expect(screen.getByText("第二道填空题")).toBeTruthy();
+    expect(screen.getByText("我已经登记 2 道错题。先从第 1 题「There be 句型」开始复习。")).toBeTruthy();
   });
 });

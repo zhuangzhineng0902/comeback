@@ -164,6 +164,49 @@ describe("simulated analyzer", () => {
     expect(result.analysis.richExplanation?.shenzhenExample.label).toBe("深圳题型风格");
   });
 
+  it("parses every mistake when MiniMax returns an analyses array", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const secondAnalysis = {
+      ...minimaxAnalysis,
+      questionType: "第二道语法选择题",
+      recognizedText: "There ____ two books on the desk.",
+      mistakeReason: "没有识别复数主语。"
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    analyses: [
+                      { ...minimaxAnalysis, richExplanation },
+                      { ...secondAnalysis, richExplanation: { ...richExplanation, diagnosis: "第二题错因" } }
+                    ]
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "paper.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.analysis.questionType).toBe("一次函数应用题");
+    expect(result.analyses).toHaveLength(2);
+    expect(result.analyses[1].questionType).toBe("第二道语法选择题");
+    expect(result.analyses[1].richExplanation?.diagnosis).toBe("第二题错因");
+  });
+
   it("normalizes rich tree context strings returned by MiniMax", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     vi.stubGlobal(

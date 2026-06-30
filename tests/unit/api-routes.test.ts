@@ -117,7 +117,8 @@ describe("api routes", () => {
   });
 
   it("analyzes up to sixteen uploaded images without subject or grade hints", async () => {
-    analyzeMistakeMock.mockResolvedValue({ mode: "api", analysis });
+    const secondAnalysis = { ...analysis, questionType: "第二道选择题", mistakeReason: "第二题错因" };
+    analyzeMistakeMock.mockResolvedValue({ mode: "api", analysis, analyses: [analysis, secondAnalysis] });
     saveAnalysisAsMistakeMock.mockResolvedValue({
       mistake: { id: "mistake-1" },
       gap: { severity: "important" }
@@ -134,7 +135,15 @@ describe("api routes", () => {
 
     const response = await POST({ formData: async () => formData } as Request);
 
-    expect(await response.json()).toMatchObject({ mode: "api", mistakeId: "mistake-1" });
+    expect(await response.json()).toMatchObject({
+      mode: "api",
+      mistakeId: "mistake-1",
+      analyses: [{ questionType: "选择题" }, { questionType: "第二道选择题" }],
+      savedMistakes: [
+        { mistakeId: "mistake-1", gapSeverity: "important" },
+        { mistakeId: "mistake-1", gapSeverity: "important" }
+      ]
+    });
     expect(analyzeMistakeMock).toHaveBeenCalledWith({
       filename: "page-1.png, page-2.png",
       mimeType: "image/png",
@@ -146,9 +155,19 @@ describe("api routes", () => {
       subjectHint: undefined,
       gradeHint: undefined
     });
-    expect(saveAnalysisAsMistakeMock).toHaveBeenCalledWith(
+    expect(saveAnalysisAsMistakeMock).toHaveBeenCalledTimes(2);
+    expect(saveAnalysisAsMistakeMock).toHaveBeenNthCalledWith(
+      1,
       expect.objectContaining({
-        imagePath: expect.stringMatching(/^uploads\/[0-9a-f-]+-page-1\.png$/)
+        imagePath: expect.stringMatching(/^uploads\/[0-9a-f-]+-page-1\.png$/),
+        analysis
+      })
+    );
+    expect(saveAnalysisAsMistakeMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        imagePath: expect.stringMatching(/^uploads\/[0-9a-f-]+-page-1\.png$/),
+        analysis: secondAnalysis
       })
     );
   });

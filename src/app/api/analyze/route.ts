@@ -71,17 +71,30 @@ export async function POST(request: Request) {
       subjectHint: subject,
       gradeHint: grade
     });
-    const saved = await saveAnalysisAsMistake({
-      studentId: "default-student",
-      imagePath: firstImage.imagePath,
-      analysis: result.analysis
-    });
+    const analyses = result.analyses ?? [result.analysis];
+    const savedMistakes = await Promise.all(
+      analyses.map(async (analysis) => {
+        const saved = await saveAnalysisAsMistake({
+          studentId: "default-student",
+          imagePath: firstImage.imagePath,
+          analysis
+        });
+
+        return {
+          mistakeId: saved.mistake.id,
+          gapSeverity: saved.gap.severity
+        };
+      })
+    );
+    const firstSaved = savedMistakes[0];
 
     return NextResponse.json({
       mode: result.mode,
       analysis: result.analysis,
-      mistakeId: saved.mistake.id,
-      gapSeverity: saved.gap.severity
+      analyses,
+      mistakeId: firstSaved.mistakeId,
+      gapSeverity: firstSaved.gapSeverity,
+      savedMistakes
     });
   } catch (error) {
     await Promise.all(uploadedImages.map((image) => unlink(image.absoluteImagePath).catch(() => undefined)));

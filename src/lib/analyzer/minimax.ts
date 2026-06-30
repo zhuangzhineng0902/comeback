@@ -69,6 +69,10 @@ const analysisSchema = baseAnalysisSchema.extend({
   richExplanation: richExplanationSchema.optional()
 });
 
+const analysesSchema = z.object({
+  analyses: z.array(analysisSchema).min(1).max(30)
+});
+
 type MiniMaxResponse = {
   choices?: Array<{
     message?: {
@@ -128,7 +132,9 @@ function buildPrompt(input: AnalyzeInput) {
   return [
     "你是一个只服务初中学生学习的私人教师 Agent。",
     "请分析图片中的错题或习题照片，输出严格 JSON，不要输出 Markdown，不要输出解释性前后缀。",
-    "JSON 必须完全符合字段：subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation。",
+    "如果图片是一整张试卷或多页试卷，请找出所有能识别出的错题；每一道错题都要单独分析，不要只分析第一题。",
+    "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
+    "analyses 每个元素必须完全符合字段：subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation。",
     "subject 必须是：语文、数学、英语、物理、化学、生物、历史、地理、道德与法治之一。",
     "grade 必须是：七年级、八年级、九年级之一。",
     "knowledgePoints 至少 1 个，confidence 是 0 到 1 的数字。",
@@ -158,7 +164,8 @@ function buildRepairPrompt(content: string, input: AnalyzeInput) {
     "不要修补原文字符，请根据原始内容重新生成完整 JSON 对象。",
     "所有 JSON 属性名必须使用英文双引号，所有字符串也必须使用英文双引号。",
     "禁止输出 JavaScript 对象、单引号、尾随逗号、注释或任何 JSON 之外的文字。",
-    "JSON 字段必须是：subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation。",
+    "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
+    "analyses 每个元素字段必须是：subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation。",
     "subject 必须是：语文、数学、英语、物理、化学、生物、历史、地理、道德与法治之一。",
     "grade 必须是：七年级、八年级、九年级之一。",
     "knowledgePoints 必须是对象数组，格式如 [{\"name\":\"知识点\",\"confidence\":0.8}]。",
@@ -198,7 +205,7 @@ function normalizeStringListField(record: Record<string, unknown>, key: string, 
   }
 }
 
-function normalizeAnalysisShape(value: unknown): unknown {
+function normalizeSingleAnalysisShape(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return value;
   }
@@ -280,6 +287,20 @@ function normalizeAnalysisShape(value: unknown): unknown {
   return record;
 }
 
+function normalizeAnalysisShape(value: unknown): unknown {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = { ...(value as Record<string, unknown>) };
+    if (Array.isArray(record.analyses)) {
+      return {
+        ...record,
+        analyses: record.analyses.map((analysis) => normalizeSingleAnalysisShape(analysis))
+      };
+    }
+  }
+
+  return normalizeSingleAnalysisShape(value);
+}
+
 function buildRichExplanationFallback(analysis: z.infer<typeof baseAnalysisSchema>): AnalysisOutput["richExplanation"] {
   const primaryKnowledgePoint = analysis.knowledgePoints[0]?.name ?? analysis.questionType;
   const firstPractice = analysis.practiceQuestions[0];
@@ -327,21 +348,37 @@ function buildRichExplanationFallback(analysis: z.infer<typeof baseAnalysisSchem
   };
 }
 
-function parseAnalysis(content: string): AnalysisOutput {
+function parseSingleAnalysis(value: unknown): AnalysisOutput {
+  const parsed = analysisSchema.safeParse(value);
+  if (parsed.success) {
+    return parsed.data;
+  }
+
+  const hasMalformedIllustration = parsed.error.issues.some((issue) => issue.path.join(".").startsWith("richExplanation.illustration"));
+  if (hasMalformedIllustration) {
+    throw parsed.error;
+  }
+
+  const base = baseAnalysisSchema.parse(value);
+  return { ...base, richExplanation: buildRichExplanationFallback(base) };
+}
+
+function parseAnalysis(content: string): AnalysisOutput[] {
   try {
     const normalized = normalizeAnalysisShape(JSON.parse(extractJsonObject(content)) as unknown);
-    const parsed = analysisSchema.safeParse(normalized);
-    if (parsed.success) {
-      return parsed.data;
+    const parsedMany = analysesSchema.safeParse(normalized);
+    if (parsedMany.success) {
+      return parsedMany.data.analyses;
     }
 
-    const hasMalformedIllustration = parsed.error.issues.some((issue) => issue.path.join(".").startsWith("richExplanation.illustration"));
-    if (hasMalformedIllustration) {
-      throw parsed.error;
+    if (normalized && typeof normalized === "object" && !Array.isArray(normalized)) {
+      const analyses = (normalized as Record<string, unknown>).analyses;
+      if (Array.isArray(analyses)) {
+        return analyses.map((analysis) => parseSingleAnalysis(analysis));
+      }
     }
 
-    const base = baseAnalysisSchema.parse(normalized);
-    return { ...base, richExplanation: buildRichExplanationFallback(base) };
+    return [parseSingleAnalysis(normalized)];
   } catch (error) {
     throw new Error(`MiniMax response could not be parsed: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -394,7 +431,7 @@ async function repairMiniMaxContent(input: {
   });
 }
 
-export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisOutput> {
+export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisOutput[]> {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey || !input.imageBase64 || !input.mimeType) {
     throw new Error("MiniMax analysis requires MINIMAX_API_KEY and image data.");
