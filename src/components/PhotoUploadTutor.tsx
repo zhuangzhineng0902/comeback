@@ -1,6 +1,6 @@
 "use client";
 
-import { LoaderCircle, Send, Upload } from "lucide-react";
+import { LoaderCircle, Send, Upload, X } from "lucide-react";
 import React, { useState } from "react";
 
 import { AnalysisCard } from "@/components/AnalysisCard";
@@ -13,6 +13,20 @@ type AnalyzeResponse = {
   mistakeId: string;
   gapSeverity: GapSeverity;
   savedMistakes?: Array<{ mistakeId: string; gapSeverity: GapSeverity }>;
+  uploadedImages?: UploadedImage[];
+  imageGroups?: ImageGroup[];
+};
+
+type UploadedImage = {
+  index: number;
+  filename: string;
+  url: string;
+};
+
+type ImageGroup = {
+  image: UploadedImage;
+  analyses: AnalysisOutput[];
+  savedMistakes: Array<{ mistakeId: string; gapSeverity: GapSeverity }>;
 };
 
 type ChatMessage = {
@@ -42,6 +56,7 @@ export function PhotoUploadTutor() {
   const [error, setError] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isChatting, setIsChatting] = useState(false);
+  const [previewImage, setPreviewImage] = useState<UploadedImage | null>(null);
 
   async function analyze() {
     if (files.length === 0) {
@@ -111,6 +126,20 @@ export function PhotoUploadTutor() {
         ? files[0].name
         : `已选择 ${files.length} 张图片`;
 
+  const resultImageGroups =
+    result?.imageGroups?.length
+      ? result.imageGroups
+      : result
+        ? [
+            {
+              image: result.uploadedImages?.[0],
+              analyses: result.analyses ?? [result.analysis],
+              savedMistakes:
+                result.savedMistakes ?? [{ mistakeId: result.mistakeId, gapSeverity: result.gapSeverity }]
+            }
+          ]
+        : [];
+
   async function sendQuestion() {
     const trimmed = question.trim();
     if (!trimmed || isChatting) {
@@ -155,6 +184,7 @@ export function PhotoUploadTutor() {
   }
 
   return (
+    <>
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
       <section className="space-y-5">
         <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -238,17 +268,50 @@ export function PhotoUploadTutor() {
 
         {result ? (
           <div className="space-y-4">
-            {(result.analyses ?? [result.analysis]).map((analysis, index) => (
-              <div key={`${analysis.questionType}-${index}`} className="space-y-2">
-                {(result.analyses?.length ?? 1) > 1 ? (
-                  <p className="text-sm font-medium text-slate-600">第 {index + 1} 道错题</p>
+            {resultImageGroups.map((group, groupIndex) => (
+              <section
+                key={group.image?.url ?? `image-group-${groupIndex}`}
+                className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+              >
+                {group.image ? (
+                  <div>
+                    <button
+                      type="button"
+                      aria-label={`查看 ${group.image.filename} 原图`}
+                      onClick={() => setPreviewImage(group.image ?? null)}
+                      className="block w-full overflow-hidden rounded-md border border-slate-200 bg-slate-50 text-left transition hover:border-slate-400"
+                    >
+                      <img
+                        src={group.image.url}
+                        alt={`${group.image.filename} 原图预览`}
+                        className="h-auto max-h-[420px] w-full object-contain"
+                      />
+                    </button>
+                    <p className="mt-2 text-xs text-slate-500">点击图片查看原图：{group.image.filename}</p>
+                  </div>
                 ) : null}
-                <AnalysisCard
-                  analysis={analysis}
-                  gapSeverity={result.savedMistakes?.[index]?.gapSeverity ?? result.gapSeverity}
-                  mode={result.mode}
-                />
-              </div>
+
+                {group.analyses.length > 0 ? (
+                  <div className="space-y-4">
+                    {group.analyses.map((analysis, index) => (
+                      <div key={`${analysis.questionType}-${groupIndex}-${index}`} className="space-y-2">
+                        {group.analyses.length > 1 || resultImageGroups.length > 1 ? (
+                          <p className="text-sm font-medium text-slate-600">第 {index + 1} 道错题</p>
+                        ) : null}
+                        <AnalysisCard
+                          analysis={analysis}
+                          gapSeverity={group.savedMistakes[index]?.gapSeverity ?? result.gapSeverity}
+                          mode={result.mode}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                    这张图片没有识别到明确错题。
+                  </p>
+                )}
+              </section>
             ))}
           </div>
         ) : (
@@ -305,5 +368,39 @@ export function PhotoUploadTutor() {
         </div>
       </aside>
     </div>
+    {previewImage ? (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${previewImage.filename} 原图`}
+        className="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 p-4"
+        onClick={() => setPreviewImage(null)}
+      >
+        <div
+          className="max-h-full w-full max-w-5xl overflow-hidden rounded-lg bg-white shadow-xl"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+            <p className="truncate text-sm font-medium text-ink">{previewImage.filename}</p>
+            <button
+              type="button"
+              aria-label="关闭原图"
+              onClick={() => setPreviewImage(null)}
+              className="grid h-9 w-9 place-items-center rounded-md text-slate-600 transition hover:bg-slate-100 hover:text-ink"
+            >
+              <X aria-hidden="true" size={18} />
+            </button>
+          </div>
+          <div className="max-h-[calc(100vh-120px)] overflow-auto bg-slate-100 p-3">
+            <img
+              src={previewImage.url}
+              alt={`${previewImage.filename} 原图`}
+              className="mx-auto h-auto max-w-full rounded-md bg-white"
+            />
+          </div>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }

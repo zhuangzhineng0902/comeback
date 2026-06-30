@@ -117,7 +117,7 @@ describe("api routes", () => {
   });
 
   it("analyzes up to sixteen uploaded images without subject or grade hints", async () => {
-    const secondAnalysis = { ...analysis, questionType: "第二道选择题", mistakeReason: "第二题错因" };
+    const secondAnalysis = { ...analysis, sourceImageIndex: 1, questionType: "第二道选择题", mistakeReason: "第二题错因" };
     analyzeMistakeMock.mockResolvedValue({ mode: "api", analysis, analyses: [analysis, secondAnalysis] });
     saveAnalysisAsMistakeMock.mockResolvedValue({
       mistake: { id: "mistake-1" },
@@ -135,15 +135,32 @@ describe("api routes", () => {
 
     const response = await POST({ formData: async () => formData } as Request);
 
-    expect(await response.json()).toMatchObject({
+    const body = await response.json();
+    expect(body).toMatchObject({
       mode: "api",
       mistakeId: "mistake-1",
       analyses: [{ questionType: "选择题" }, { questionType: "第二道选择题" }],
+      uploadedImages: [
+        { index: 0, filename: "page-1.png" },
+        { index: 1, filename: "page-2.png" }
+      ],
+      imageGroups: [
+        {
+          image: { index: 0, filename: "page-1.png" },
+          analyses: [{ questionType: "选择题" }]
+        },
+        {
+          image: { index: 1, filename: "page-2.png" },
+          analyses: [{ questionType: "第二道选择题" }]
+        }
+      ],
       savedMistakes: [
         { mistakeId: "mistake-1", gapSeverity: "important" },
         { mistakeId: "mistake-1", gapSeverity: "important" }
       ]
     });
+    expect(body.uploadedImages[0].url).toMatch(/^\/api\/uploads\/[0-9a-f-]+-page-1\.png$/);
+    expect(body.uploadedImages[1].url).toMatch(/^\/api\/uploads\/[0-9a-f-]+-page-2\.png$/);
     expect(analyzeMistakeMock).toHaveBeenCalledWith({
       filename: "page-1.png, page-2.png",
       mimeType: "image/png",
@@ -166,7 +183,7 @@ describe("api routes", () => {
     expect(saveAnalysisAsMistakeMock).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        imagePath: expect.stringMatching(/^uploads\/[0-9a-f-]+-page-1\.png$/),
+        imagePath: expect.stringMatching(/^uploads\/[0-9a-f-]+-page-2\.png$/),
         analysis: secondAnalysis
       })
     );

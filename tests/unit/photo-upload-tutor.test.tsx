@@ -88,6 +88,20 @@ describe("PhotoUploadTutor", () => {
               baseAnalysis,
               { ...baseAnalysis, questionType: "第二道填空题", recognizedText: "There ____ two pens." }
             ],
+            uploadedImages: [{ index: 0, filename: "试卷.png", url: "/api/uploads/test-paper.png" }],
+            imageGroups: [
+              {
+                image: { index: 0, filename: "试卷.png", url: "/api/uploads/test-paper.png" },
+                analyses: [
+                  baseAnalysis,
+                  { ...baseAnalysis, questionType: "第二道填空题", recognizedText: "There ____ two pens." }
+                ],
+                savedMistakes: [
+                  { mistakeId: "mistake-1", gapSeverity: "normal" },
+                  { mistakeId: "mistake-2", gapSeverity: "important" }
+                ]
+              }
+            ],
             mistakeId: "mistake-1",
             gapSeverity: "normal",
             savedMistakes: [
@@ -115,6 +129,10 @@ describe("PhotoUploadTutor", () => {
     });
     expect(screen.getByText("第一道选择题")).toBeTruthy();
     expect(screen.getByText("第二道填空题")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "试卷.png 原图预览" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "查看 试卷.png 原图" }));
+    expect(screen.getByRole("dialog", { name: "试卷.png 原图" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "试卷.png 原图" })).toBeTruthy();
     expect(screen.getByText("我已经登记 2 道错题。先从第 1 题「There be 句型」开始复习。")).toBeTruthy();
   });
 });

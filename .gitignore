@@ -7,7 +7,7 @@ dist/
 coverage/
 .env
 .env.local
-uploads/
+/uploads/
 *.log
 prisma/dev.db
 prisma/dev.db-journal

@@ -44,6 +44,7 @@ const richExplanationSchema = z.object({
 });
 
 const baseAnalysisSchema = z.object({
+  sourceImageIndex: z.number().int().min(0).max(15).optional(),
   subject: z.enum(subjects),
   grade: z.enum(grades),
   questionType: z.string().min(1),
@@ -134,7 +135,8 @@ function buildPrompt(input: AnalyzeInput) {
     "请分析图片中的错题或习题照片，输出严格 JSON，不要输出 Markdown，不要输出解释性前后缀。",
     "如果图片是一整张试卷或多页试卷，请找出所有能识别出的错题；每一道错题都要单独分析，不要只分析第一题。",
     "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
-    "analyses 每个元素必须完全符合字段：subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation。",
+    "analyses 每个元素必须完全符合字段：sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation。",
+    "sourceImageIndex 表示这道错题来自第几张上传图片，图片索引从 0 开始；无法判断时填 0。",
     "subject 必须是：语文、数学、英语、物理、化学、生物、历史、地理、道德与法治之一。",
     "grade 必须是：七年级、八年级、九年级之一。",
     "knowledgePoints 至少 1 个，confidence 是 0 到 1 的数字。",
@@ -165,7 +167,8 @@ function buildRepairPrompt(content: string, input: AnalyzeInput) {
     "所有 JSON 属性名必须使用英文双引号，所有字符串也必须使用英文双引号。",
     "禁止输出 JavaScript 对象、单引号、尾随逗号、注释或任何 JSON 之外的文字。",
     "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
-    "analyses 每个元素字段必须是：subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation。",
+    "analyses 每个元素字段必须是：sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation。",
+    "sourceImageIndex 表示这道错题来自第几张上传图片，图片索引从 0 开始；无法判断时填 0。",
     "subject 必须是：语文、数学、英语、物理、化学、生物、历史、地理、道德与法治之一。",
     "grade 必须是：七年级、八年级、九年级之一。",
     "knowledgePoints 必须是对象数组，格式如 [{\"name\":\"知识点\",\"confidence\":0.8}]。",

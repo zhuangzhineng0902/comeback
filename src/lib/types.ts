@@ -42,6 +42,7 @@ export type RichExplanation = {
 };
 
 export type AnalysisOutput = {
+  sourceImageIndex?: number;
   subject: Subject;
   grade: Grade;
   questionType: string;

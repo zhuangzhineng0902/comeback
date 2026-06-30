@@ -182,8 +182,8 @@ describe("simulated analyzer", () => {
                 message: {
                   content: JSON.stringify({
                     analyses: [
-                      { ...minimaxAnalysis, richExplanation },
-                      { ...secondAnalysis, richExplanation: { ...richExplanation, diagnosis: "第二题错因" } }
+                      { ...minimaxAnalysis, sourceImageIndex: 0, richExplanation },
+                      { ...secondAnalysis, sourceImageIndex: 1, richExplanation: { ...richExplanation, diagnosis: "第二题错因" } }
                     ]
                   })
                 }
@@ -203,6 +203,7 @@ describe("simulated analyzer", () => {
 
     expect(result.analysis.questionType).toBe("一次函数应用题");
     expect(result.analyses).toHaveLength(2);
+    expect(result.analyses.map((item) => item.sourceImageIndex)).toEqual([0, 1]);
     expect(result.analyses[1].questionType).toBe("第二道语法选择题");
     expect(result.analyses[1].richExplanation?.diagnosis).toBe("第二题错因");
   });
@@ -443,6 +444,8 @@ describe("simulated analyzer", () => {
     expect(prompt).toContain("richExplanation");
     expect(prompt).toContain("老师板书式讲解");
     expect(prompt).toContain("知识树上下文");
+    expect(prompt).toContain("sourceImageIndex");
+    expect(prompt).toContain("图片索引从 0 开始");
     expect(prompt).toContain("深圳题型风格");
     expect(prompt).toContain("不要把未核验来源的题目说成深圳真题");
     expect(prompt).toContain("illustration 只能是结构化数据");

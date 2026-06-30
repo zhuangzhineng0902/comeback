@@ -19,6 +19,7 @@ export async function analyzeWithSimulation(input: AnalyzeInput): Promise<Analys
 
   if (subject === "数学") {
     return {
+      sourceImageIndex: 0,
       subject,
       grade,
       questionType: "函数图像判断题",
@@ -89,6 +90,7 @@ export async function analyzeWithSimulation(input: AnalyzeInput): Promise<Analys
   }
 
   return {
+    sourceImageIndex: 0,
     subject,
     grade,
     questionType: "语法选择题",

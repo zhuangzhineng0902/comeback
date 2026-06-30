@@ -10,6 +10,15 @@ const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "ima
 const maxUploadBytes = 8 * 1024 * 1024;
 const maxUploadFiles = 16;
 
+type UploadedImage = {
+  filename: string;
+  safeName: string;
+  mimeType: string;
+  imageBase64: string;
+  imagePath: string;
+  absoluteImagePath: string;
+};
+
 export async function POST(request: Request) {
   const formData = await request.formData();
   const files = [
@@ -40,7 +49,7 @@ export async function POST(request: Request) {
 
   const uploadDir = path.join(process.cwd(), "uploads");
   await mkdir(uploadDir, { recursive: true });
-  const uploadedImages = [];
+  const uploadedImages: UploadedImage[] = [];
 
   for (const file of files) {
     const bytes = Buffer.from(await file.arrayBuffer());
@@ -50,6 +59,7 @@ export async function POST(request: Request) {
     await writeFile(absoluteImagePath, bytes);
     uploadedImages.push({
       filename: file.name,
+      safeName,
       mimeType: file.type,
       imageBase64: bytes.toString("base64"),
       imagePath,
@@ -72,11 +82,23 @@ export async function POST(request: Request) {
       gradeHint: grade
     });
     const analyses = result.analyses ?? [result.analysis];
+    const imageSummaries = uploadedImages.map((image, index) => ({
+      index,
+      filename: image.filename,
+      url: `/api/uploads/${encodeURIComponent(image.safeName)}`
+    }));
     const savedMistakes = await Promise.all(
       analyses.map(async (analysis) => {
+        const sourceImageIndex =
+          typeof analysis.sourceImageIndex === "number" &&
+          analysis.sourceImageIndex >= 0 &&
+          analysis.sourceImageIndex < uploadedImages.length
+            ? analysis.sourceImageIndex
+            : 0;
+        const sourceImage = uploadedImages[sourceImageIndex] ?? firstImage;
         const saved = await saveAnalysisAsMistake({
           studentId: "default-student",
-          imagePath: firstImage.imagePath,
+          imagePath: sourceImage.imagePath,
           analysis
         });
 
@@ -87,6 +109,22 @@ export async function POST(request: Request) {
       })
     );
     const firstSaved = savedMistakes[0];
+    const imageGroups = imageSummaries.map((image) => ({
+      image,
+      analyses: [] as typeof analyses,
+      savedMistakes: [] as typeof savedMistakes
+    }));
+
+    analyses.forEach((analysis, index) => {
+      const sourceImageIndex =
+        typeof analysis.sourceImageIndex === "number" &&
+        analysis.sourceImageIndex >= 0 &&
+        analysis.sourceImageIndex < imageGroups.length
+          ? analysis.sourceImageIndex
+          : 0;
+      imageGroups[sourceImageIndex].analyses.push(analysis);
+      imageGroups[sourceImageIndex].savedMistakes.push(savedMistakes[index]);
+    });
 
     return NextResponse.json({
       mode: result.mode,
@@ -94,7 +132,9 @@ export async function POST(request: Request) {
       analyses,
       mistakeId: firstSaved.mistakeId,
       gapSeverity: firstSaved.gapSeverity,
-      savedMistakes
+      savedMistakes,
+      uploadedImages: imageSummaries,
+      imageGroups
     });
   } catch (error) {
     await Promise.all(uploadedImages.map((image) => unlink(image.absoluteImagePath).catch(() => undefined)));
