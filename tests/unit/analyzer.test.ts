@@ -164,6 +164,102 @@ describe("simulated analyzer", () => {
     expect(result.analysis.richExplanation?.shenzhenExample.label).toBe("深圳题型风格");
   });
 
+  it("includes MiniMax error response details when the request is rejected", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            type: "error",
+            error: {
+              type: "bad_request_error",
+              message: "invalid param: image url must be http(s):// or data:...;base64 (2013)"
+            }
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    await expect(
+      analyzeMistake({
+        filename: "worksheet.png",
+        mimeType: "image/png",
+        imageBase64: Buffer.from("image-bytes").toString("base64")
+      })
+    ).rejects.toThrow("invalid param: image url must be http(s):// or data:...;base64");
+  });
+
+  it("normalizes blank MiniMax fields instead of failing the whole analysis", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    ...minimaxAnalysis,
+                    studentAnswer: "",
+                    mistakeReason: ""
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.analysis.studentAnswer).toBe("图片中未清晰识别到学生答案。");
+    expect(result.analysis.mistakeReason).toBe("未识别到明确错因，建议先核对题目条件和作答步骤。");
+  });
+
+  it("normalizes string common traps returned by MiniMax", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    ...minimaxAnalysis,
+                    archetype: {
+                      ...minimaxAnalysis.archetype,
+                      commonTraps: "漏看等号两边同加同减；移项变号出错"
+                    }
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.analysis.archetype.commonTraps).toEqual(["漏看等号两边同加同减", "移项变号出错"]);
+  });
+
   it("parses every mistake when MiniMax returns an analyses array", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     const secondAnalysis = {
@@ -406,9 +502,13 @@ describe("simulated analyzer", () => {
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as {
       thinking?: { type?: string };
+      response_format?: { type?: string };
+      max_completion_tokens?: number;
       messages: Array<{ content: Array<{ type: string; image_url?: { url: string } }> }>;
     };
     expect(requestBody.thinking).toEqual({ type: "disabled" });
+    expect(requestBody.response_format).toEqual({ type: "json_object" });
+    expect(requestBody.max_completion_tokens).toBe(4000);
     const imageUrls = requestBody.messages[0].content
       .filter((item) => item.type === "image_url")
       .map((item) => item.image_url?.url);
@@ -606,9 +706,13 @@ describe("simulated analyzer", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const repairBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)) as {
       thinking?: { type?: string };
+      response_format?: { type?: string };
+      max_completion_tokens?: number;
       messages: Array<{ content: string }>;
     };
     expect(repairBody.thinking).toEqual({ type: "disabled" });
+    expect(repairBody.response_format).toEqual({ type: "json_object" });
+    expect(repairBody.max_completion_tokens).toBe(4000);
     expect(repairBody.messages[0].content).toContain("转换成严格 JSON");
     expect(repairBody.messages[0].content).toContain("所有 JSON 属性名必须使用英文双引号");
     expect(repairBody.messages[0].content).toContain("重新生成完整 JSON 对象");

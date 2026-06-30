@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,6 +24,7 @@ const analysis = {
 
 const analyzeMistakeMock = vi.fn();
 const saveAnalysisAsMistakeMock = vi.fn();
+const execFileMock = vi.hoisted(() => vi.fn());
 const prismaMock = {
   mistake: {
     findFirst: vi.fn(),
@@ -56,10 +57,16 @@ vi.mock("@/lib/db", () => ({
   prisma: prismaMock
 }));
 
+vi.mock("node:child_process", () => ({
+  default: { execFile: execFileMock },
+  execFile: execFileMock
+}));
+
 describe("api routes", () => {
   beforeEach(() => {
     analyzeMistakeMock.mockReset();
     saveAnalysisAsMistakeMock.mockReset();
+    execFileMock.mockReset();
     prismaMock.mistake.findFirst.mockReset();
     prismaMock.mistake.findMany.mockReset();
     prismaMock.mistake.findUnique.mockReset();
@@ -187,6 +194,54 @@ describe("api routes", () => {
         analysis: secondAnalysis
       })
     );
+  });
+
+  it("converts HEIC uploads to JPEG before sending images to the analyzer", async () => {
+    execFileMock.mockImplementation((command: string, args: string[], callback: (error: Error | null, stdout?: string, stderr?: string) => void) => {
+      const outputPath = args[args.indexOf("--out") + 1];
+      void writeFile(outputPath, "converted-jpeg-bytes").then(
+        () => callback(null, "", ""),
+        (error) => callback(error)
+      );
+      return {};
+    });
+    analyzeMistakeMock.mockResolvedValue({ mode: "api", analysis });
+    saveAnalysisAsMistakeMock.mockResolvedValue({
+      mistake: { id: "mistake-1" },
+      gap: { severity: "normal" }
+    });
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    const file = new File(["heic-image-bytes"], "paper.heic", { type: "image/heic" });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new TextEncoder().encode("heic-image-bytes").buffer
+    });
+    formData.set("file", file);
+
+    const response = await POST({ formData: async () => formData } as Request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.uploadedImages[0].url).toMatch(/^\/api\/uploads\/[0-9a-f-]+-paper\.heic$/);
+    expect(execFileMock).toHaveBeenCalledWith(
+      "sips",
+      expect.arrayContaining(["-s", "format", "jpeg", "--out"]),
+      expect.any(Function)
+    );
+    expect(analyzeMistakeMock).toHaveBeenCalledWith({
+      filename: "paper.heic",
+      mimeType: "image/jpeg",
+      imageBase64: Buffer.from("converted-jpeg-bytes").toString("base64"),
+      images: [
+        {
+          filename: "paper.heic",
+          mimeType: "image/jpeg",
+          imageBase64: Buffer.from("converted-jpeg-bytes").toString("base64")
+        }
+      ],
+      subjectHint: undefined,
+      gradeHint: undefined
+    });
   });
 
   it("rejects more than sixteen uploaded images", async () => {

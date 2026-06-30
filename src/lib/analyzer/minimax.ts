@@ -208,12 +208,27 @@ function normalizeStringListField(record: Record<string, unknown>, key: string, 
   }
 }
 
+function normalizeRequiredStringField(record: Record<string, unknown>, key: string, fallback: string) {
+  const value = record[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    record[key] = fallback;
+  }
+}
+
 function normalizeSingleAnalysisShape(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return value;
   }
 
   const record = { ...(value as Record<string, unknown>) };
+
+  normalizeRequiredStringField(record, "questionType", "未识别题型");
+  normalizeRequiredStringField(record, "recognizedText", "图片中未清晰识别到完整题干。");
+  normalizeRequiredStringField(record, "studentAnswer", "图片中未清晰识别到学生答案。");
+  normalizeRequiredStringField(record, "correctAnswer", "需要结合题目重新推导。");
+  normalizeRequiredStringField(record, "mistakeReason", "未识别到明确错因，建议先核对题目条件和作答步骤。");
+  normalizeRequiredStringField(record, "studentFriendlyExplanation", "先把题干条件圈出来，再一步一步核对自己的作答。");
+  normalizeRequiredStringField(record, "example", "可以先用同类基础题练习，再回到原题。");
 
   if (Array.isArray(record.knowledgePoints)) {
     record.knowledgePoints = record.knowledgePoints.map((point) => {
@@ -231,6 +246,16 @@ function normalizeSingleAnalysisShape(value: unknown): unknown {
       solutionTemplate: record.archetype,
       commonTraps: ["只记结论，没有套用完整母题模板"]
     };
+  } else if (record.archetype && typeof record.archetype === "object" && !Array.isArray(record.archetype)) {
+    const archetype = { ...(record.archetype as Record<string, unknown>) };
+    normalizeRequiredStringField(archetype, "title", "同类母题");
+    normalizeRequiredStringField(archetype, "pattern", "先识别条件，再按步骤求解。");
+    normalizeRequiredStringField(archetype, "solutionTemplate", "圈条件、列步骤、核对答案。");
+    normalizeStringListField(archetype, "commonTraps");
+    if (!Array.isArray(archetype.commonTraps) || archetype.commonTraps.length === 0) {
+      archetype.commonTraps = ["只记结论，没有套用完整母题模板"];
+    }
+    record.archetype = archetype;
   }
 
   if (Array.isArray(record.practiceQuestions)) {
@@ -398,7 +423,13 @@ async function postMiniMax(input: { baseUrl: string; apiKey: string; body: unkno
   });
 
   if (!response.ok) {
-    throw new Error(`MiniMax request failed with status ${response.status}.`);
+    const detail = await response.text().catch(() => "");
+    const compactDetail = detail.trim().replace(/\s+/g, " ").slice(0, 500);
+    throw new Error(
+      compactDetail
+        ? `MiniMax request failed with status ${response.status}: ${compactDetail}`
+        : `MiniMax request failed with status ${response.status}.`
+    );
   }
 
   const payload = (await response.json()) as MiniMaxResponse;
@@ -428,8 +459,9 @@ async function repairMiniMaxContent(input: {
         }
       ],
       thinking: { type: "disabled" },
+      response_format: { type: "json_object" },
       temperature: 0,
-      max_tokens: 4000
+      max_completion_tokens: 4000
     }
   });
 }
@@ -463,8 +495,9 @@ export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisO
         }
       ],
       thinking: { type: "disabled" },
+      response_format: { type: "json_object" },
       temperature: 0.2,
-      max_tokens: 4000
+      max_completion_tokens: 4000
     }
   });
 
