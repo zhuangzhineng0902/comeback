@@ -129,6 +129,24 @@ function extractJsonObject(content: string) {
   return stripped.slice(start);
 }
 
+function repairJsonLikeSyntax(content: string) {
+  return content
+    .replace(/[“”]/g, "\"")
+    .replace(/[‘’]/g, "'")
+    .replace(/([{,]\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:/g, "$1\"$2\":")
+    .replace(/,\s*([}\]])/g, "$1");
+}
+
+function parseJsonObject(content: string): unknown {
+  const extracted = extractJsonObject(content);
+
+  try {
+    return JSON.parse(extracted) as unknown;
+  } catch {
+    return JSON.parse(repairJsonLikeSyntax(extracted)) as unknown;
+  }
+}
+
 function buildPrompt(input: AnalyzeInput) {
   return [
     "你是一个只服务初中学生学习的私人教师 Agent。",
@@ -393,7 +411,7 @@ function parseSingleAnalysis(value: unknown): AnalysisOutput {
 
 function parseAnalysis(content: string): AnalysisOutput[] {
   try {
-    const normalized = normalizeAnalysisShape(JSON.parse(extractJsonObject(content)) as unknown);
+    const normalized = normalizeAnalysisShape(parseJsonObject(content));
     const parsedMany = analysesSchema.safeParse(normalized);
     if (parsedMany.success) {
       return parsedMany.data.analyses;

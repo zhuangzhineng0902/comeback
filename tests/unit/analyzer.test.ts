@@ -260,6 +260,54 @@ describe("simulated analyzer", () => {
     expect(result.analysis.archetype.commonTraps).toEqual(["漏看等号两边同加同减", "移项变号出错"]);
   });
 
+  it("repairs JSON-like MiniMax content with trailing commas and unquoted keys", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const jsonLikeContent = `{
+      analyses: [
+        {
+          sourceImageIndex: 0,
+          subject: "数学",
+          grade: "七年级",
+          questionType: "解答题",
+          recognizedText: "2x + 3 = 7",
+          studentAnswer: "未作答",
+          correctAnswer: "x = 2",
+          knowledgePoints: [{"name":"一元一次方程","confidence":0.95}],
+          mistakeReason: "移项规则不熟",
+          studentFriendlyExplanation: "先两边同时减 3，再同时除以 2。",
+          example: "3x + 1 = 7",
+          archetype: {
+            title: "一元一次方程",
+            pattern: "ax+b=c",
+            solutionTemplate: "移项，合并，系数化 1",
+            commonTraps: ["移项忘记变号"],
+          },
+          practiceQuestions: [{"question":"x+1=3","answer":"x=2","hint":"两边减 1"}],
+        },
+      ],
+    }`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: jsonLikeContent } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.analysis.questionType).toBe("解答题");
+    expect(result.analysis.archetype.commonTraps).toEqual(["移项忘记变号"]);
+  });
+
   it("parses every mistake when MiniMax returns an analyses array", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     const secondAnalysis = {

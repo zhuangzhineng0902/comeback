@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { NextResponse } from "next/server";
 import { analyzeMistake } from "@/lib/analyzer";
+import { analyzeWithSimulation } from "@/lib/analyzer/simulated";
 import { saveAnalysisAsMistake } from "@/lib/repositories/mistakes";
 import { grades, subjects, type Grade, type Subject } from "@/lib/types";
 
@@ -31,6 +32,10 @@ async function convertHeicToJpeg(inputPath: string, outputPath: string) {
   } catch (error) {
     throw new Error(`HEIC 图片转换失败，请改用 JPG、PNG 或 WebP 后重新上传。${error instanceof Error ? ` ${error.message}` : ""}`);
   }
+}
+
+function isMiniMaxFailure(error: unknown) {
+  return error instanceof Error && error.message.includes("MiniMax");
 }
 
 export async function POST(request: Request) {
@@ -99,7 +104,7 @@ export async function POST(request: Request) {
 
   try {
     const firstImage = uploadedImages[0];
-    const result = await analyzeMistake({
+    const analyzeInput = {
       filename: uploadedImages.map((image) => image.filename).join(", "),
       mimeType: firstImage.analysisMimeType,
       imageBase64: firstImage.analysisImageBase64,
@@ -110,6 +115,15 @@ export async function POST(request: Request) {
       })),
       subjectHint: subject,
       gradeHint: grade
+    };
+    const result = await analyzeMistake(analyzeInput).catch(async (error) => {
+      if (!isMiniMaxFailure(error)) {
+        throw error;
+      }
+
+      console.error("MiniMax analysis failed; falling back to simulation", error);
+      const analysis = await analyzeWithSimulation(analyzeInput);
+      return { mode: "simulation" as const, analysis, analyses: [analysis] };
     });
     const analyses = result.analyses ?? [result.analysis];
     const imageSummaries = uploadedImages.map((image, index) => ({
@@ -174,7 +188,7 @@ export async function POST(request: Request) {
         image.analysisAbsoluteImagePath ? unlink(image.analysisAbsoluteImagePath).catch(() => undefined) : Promise.resolve()
       ])
     );
-    const message = error instanceof Error && error.message.includes("MiniMax")
+    const message = isMiniMaxFailure(error)
       ? "真实 AI 分析失败，请稍后重试。"
       : "分析失败，请稍后重试。";
     const detail = process.env.NODE_ENV === "development" && error instanceof Error ? error.message : undefined;

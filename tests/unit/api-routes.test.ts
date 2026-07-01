@@ -316,6 +316,35 @@ describe("api routes", () => {
     expect(files).toEqual([]);
   });
 
+  it("falls back to simulation when real AI analysis fails after upload", async () => {
+    analyzeMistakeMock.mockRejectedValue(new Error("MiniMax response could not be parsed: malformed JSON"));
+    saveAnalysisAsMistakeMock.mockResolvedValue({
+      mistake: { id: "mistake-1" },
+      gap: { severity: "normal" }
+    });
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    const file = new File(["image-bytes"], "paper.png", { type: "image/png" });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new TextEncoder().encode("image-bytes").buffer
+    });
+    formData.set("file", file);
+
+    const response = await POST({ formData: async () => formData } as Request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.mode).toBe("simulation");
+    expect(body.analysis.questionType).toBeTruthy();
+    expect(body.uploadedImages[0]).toMatchObject({ index: 0, filename: "paper.png" });
+    expect(saveAnalysisAsMistakeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        studentId: "default-student",
+        imagePath: expect.stringMatching(/^uploads\/[0-9a-f-]+-paper\.png$/)
+      })
+    );
+  });
+
   it("stores study chat messages for a mistake", async () => {
     prismaMock.mistake.findFirst.mockResolvedValue({ id: "mistake-1" });
     const { POST } = await import("@/app/api/chat/route");
