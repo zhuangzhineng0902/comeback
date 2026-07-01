@@ -219,6 +219,28 @@ describe("simulated analyzer", () => {
     expect(JSON.stringify(fetchMock.mock.calls[0][1]?.body)).toContain("学生答案区域");
   });
 
+  it("allows long MiniMax outputs for full-paper analysis", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(minimaxAnalysis) } }]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await analyzeMistake({
+      filename: "full-paper.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.max_completion_tokens).toBeGreaterThanOrEqual(8000);
+  });
+
   it("includes MiniMax error response details when the request is rejected", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     vi.stubGlobal(
@@ -313,6 +335,43 @@ describe("simulated analyzer", () => {
     });
 
     expect(result.analysis.archetype.commonTraps).toEqual(["漏看等号两边同加同减", "移项变号出错"]);
+  });
+
+  it("normalizes incomplete MiniMax practice questions instead of falling back", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    ...minimaxAnalysis,
+                    practiceQuestions: [{ question: "2x+1=5", answer: "x=2" }]
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.mode).toBe("api");
+    expect(result.analysis.practiceQuestions[0]).toEqual({
+      question: "2x+1=5",
+      answer: "x=2",
+      hint: "套用本题母题模板，先找关键条件，再按步骤判断。"
+    });
   });
 
   it("repairs JSON-like MiniMax content with trailing commas and unquoted keys", async () => {
@@ -611,7 +670,7 @@ describe("simulated analyzer", () => {
     };
     expect(requestBody.thinking).toEqual({ type: "disabled" });
     expect(requestBody.response_format).toEqual({ type: "json_object" });
-    expect(requestBody.max_completion_tokens).toBe(4000);
+    expect(requestBody.max_completion_tokens).toBeGreaterThanOrEqual(8000);
     const imageUrls = requestBody.messages[0].content
       .filter((item) => item.type === "image_url")
       .map((item) => item.image_url?.url);
@@ -815,7 +874,7 @@ describe("simulated analyzer", () => {
     };
     expect(repairBody.thinking).toEqual({ type: "disabled" });
     expect(repairBody.response_format).toEqual({ type: "json_object" });
-    expect(repairBody.max_completion_tokens).toBe(4000);
+    expect(repairBody.max_completion_tokens).toBeGreaterThanOrEqual(8000);
     expect(repairBody.messages[0].content).toContain("转换成严格 JSON");
     expect(repairBody.messages[0].content).toContain("所有 JSON 属性名必须使用英文双引号");
     expect(repairBody.messages[0].content).toContain("重新生成完整 JSON 对象");

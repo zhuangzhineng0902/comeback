@@ -5,6 +5,7 @@ import { grades, subjects, type AnalysisOutput } from "@/lib/types";
 
 const defaultMiniMaxBaseUrl = "https://api.minimaxi.com/v1";
 const defaultModel = "MiniMax-M3";
+const defaultMaxCompletionTokens = 8000;
 const gradingMarkTypes = ["check", "cross", "partial", "deduction", "circle", "question", "none", "unknown"] as const;
 const mistakeJudgements = ["wrong", "partial", "suspected", "correct", "unknown"] as const;
 
@@ -92,11 +93,17 @@ const analysesSchema = z.object({
 
 type MiniMaxResponse = {
   choices?: Array<{
+    finish_reason?: string;
     message?: {
       content?: string;
     };
   }>;
 };
+
+function getMaxCompletionTokens() {
+  const configured = Number.parseInt(process.env.MINIMAX_MAX_COMPLETION_TOKENS ?? "", 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : defaultMaxCompletionTokens;
+}
 
 function stripJsonFence(content: string) {
   const trimmed = content.trim();
@@ -410,7 +417,18 @@ function normalizeSingleAnalysisShape(value: unknown): unknown {
           hint: "套用本题母题模板，先找关键条件，再按步骤判断。"
         };
       }
-      return question;
+      if (question && typeof question === "object" && !Array.isArray(question)) {
+        const normalizedQuestion = { ...(question as Record<string, unknown>) };
+        normalizeRequiredStringField(normalizedQuestion, "question", "请完成一道同类基础题。");
+        normalizeRequiredStringField(normalizedQuestion, "answer", "请先尝试作答，再让老师批改。");
+        normalizeRequiredStringField(normalizedQuestion, "hint", "套用本题母题模板，先找关键条件，再按步骤判断。");
+        return normalizedQuestion;
+      }
+      return {
+        question: "请完成一道同类基础题。",
+        answer: "请先尝试作答，再让老师批改。",
+        hint: "套用本题母题模板，先找关键条件，再按步骤判断。"
+      };
     });
   }
 
@@ -576,9 +594,15 @@ async function postMiniMax(input: { baseUrl: string; apiKey: string; body: unkno
   }
 
   const payload = (await response.json()) as MiniMaxResponse;
-  const content = payload.choices?.[0]?.message?.content;
+  const choice = payload.choices?.[0];
+  const content = choice?.message?.content;
   if (!content) {
     throw new Error("MiniMax response did not include message content.");
+  }
+  if (choice?.finish_reason === "length") {
+    throw new Error(
+      `MiniMax response was truncated at ${getMaxCompletionTokens()} completion tokens. Increase MINIMAX_MAX_COMPLETION_TOKENS or reduce requested analysis detail.`
+    );
   }
 
   return content;
@@ -604,7 +628,7 @@ async function repairMiniMaxContent(input: {
       thinking: { type: "disabled" },
       response_format: { type: "json_object" },
       temperature: 0,
-      max_completion_tokens: 4000
+      max_completion_tokens: getMaxCompletionTokens()
     }
   });
 }
@@ -640,7 +664,7 @@ export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisO
       thinking: { type: "disabled" },
       response_format: { type: "json_object" },
       temperature: 0.2,
-      max_completion_tokens: 4000
+      max_completion_tokens: getMaxCompletionTokens()
     }
   });
 
