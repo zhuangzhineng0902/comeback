@@ -75,7 +75,19 @@ describe("PhotoUploadTutor", () => {
         solutionTemplate: "先找最近名词。",
         commonTraps: ["只看复数名词"]
       },
-      practiceQuestions: [{ question: "There ____ two books.", answer: "are", hint: "看最近名词。" }]
+      practiceQuestions: [{ question: "There ____ two books.", answer: "are", hint: "看最近名词。" }],
+      gradingEvidence: {
+        markType: "partial",
+        markText: "半勾，扣 1 分",
+        deductedScore: 1,
+        teacherMarkConfidence: 0.82,
+        answerMatchConfidence: 0.76,
+        judgement: "partial",
+        isPartialCredit: true,
+        needsConfirmation: true,
+        evidenceSummary: "老师批改处有半勾，学生答案只完成前半步。",
+        studentAnswerLocation: "题目下方空白处"
+      }
     };
     vi.stubGlobal(
       "fetch",
@@ -129,6 +141,10 @@ describe("PhotoUploadTutor", () => {
     });
     expect(screen.getByText("第一道选择题")).toBeTruthy();
     expect(screen.getByText("第二道填空题")).toBeTruthy();
+    expect(screen.getAllByText("判定依据").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("半对/部分得分").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("需人工确认").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("老师批改处有半勾，学生答案只完成前半步。").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("img", { name: "试卷.png 原图预览" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "查看 试卷.png 原图" }));
     expect(screen.getByRole("dialog", { name: "试卷.png 原图" })).toBeTruthy();

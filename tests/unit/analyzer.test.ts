@@ -164,6 +164,61 @@ describe("simulated analyzer", () => {
     expect(result.analysis.richExplanation?.shenzhenExample.label).toBe("深圳题型风格");
   });
 
+  it("preserves hybrid grading evidence from MiniMax", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  ...minimaxAnalysis,
+                  gradingEvidence: {
+                    markType: "partial",
+                    markText: "半勾，扣 2 分",
+                    deductedScore: 2,
+                    teacherMarkConfidence: 0.86,
+                    answerMatchConfidence: 0.78,
+                    judgement: "partial",
+                    isPartialCredit: true,
+                    needsConfirmation: true,
+                    evidenceSummary: "老师批改处有半勾和扣分，学生后半步计算错误。",
+                    studentAnswerLocation: "题目右侧草稿区"
+                  }
+                })
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.analysis.gradingEvidence).toEqual({
+      markType: "partial",
+      markText: "半勾，扣 2 分",
+      deductedScore: 2,
+      teacherMarkConfidence: 0.86,
+      answerMatchConfidence: 0.78,
+      judgement: "partial",
+      isPartialCredit: true,
+      needsConfirmation: true,
+      evidenceSummary: "老师批改处有半勾和扣分，学生后半步计算错误。",
+      studentAnswerLocation: "题目右侧草稿区"
+    });
+    expect(JSON.stringify(fetchMock.mock.calls[0][1]?.body)).toContain("半勾");
+    expect(JSON.stringify(fetchMock.mock.calls[0][1]?.body)).toContain("独立完整解题");
+    expect(JSON.stringify(fetchMock.mock.calls[0][1]?.body)).toContain("学生答案区域");
+  });
+
   it("includes MiniMax error response details when the request is rejected", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     vi.stubGlobal(

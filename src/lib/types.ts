@@ -41,6 +41,22 @@ export type RichExplanation = {
   };
 };
 
+export type GradingMarkType = "check" | "cross" | "partial" | "deduction" | "circle" | "question" | "none" | "unknown";
+export type MistakeJudgement = "wrong" | "partial" | "suspected" | "correct" | "unknown";
+
+export type GradingEvidence = {
+  markType: GradingMarkType;
+  markText?: string;
+  deductedScore?: number;
+  teacherMarkConfidence: number;
+  answerMatchConfidence: number;
+  judgement: MistakeJudgement;
+  isPartialCredit: boolean;
+  needsConfirmation: boolean;
+  evidenceSummary: string;
+  studentAnswerLocation?: string;
+};
+
 export type AnalysisOutput = {
   sourceImageIndex?: number;
   subject: Subject;
@@ -61,4 +77,5 @@ export type AnalysisOutput = {
   };
   practiceQuestions: Array<{ question: string; answer: string; hint: string }>;
   richExplanation?: RichExplanation;
+  gradingEvidence?: GradingEvidence;
 };

@@ -5,6 +5,8 @@ import { grades, subjects, type AnalysisOutput } from "@/lib/types";
 
 const defaultMiniMaxBaseUrl = "https://api.minimaxi.com/v1";
 const defaultModel = "MiniMax-M3";
+const gradingMarkTypes = ["check", "cross", "partial", "deduction", "circle", "question", "none", "unknown"] as const;
+const mistakeJudgements = ["wrong", "partial", "suspected", "correct", "unknown"] as const;
 
 const richIllustrationSchema = z.object({
   type: z.enum(["flow", "compare", "treePath"]),
@@ -43,6 +45,19 @@ const richExplanationSchema = z.object({
   })
 });
 
+const gradingEvidenceSchema = z.object({
+  markType: z.enum(gradingMarkTypes),
+  markText: z.string().min(1).optional(),
+  deductedScore: z.number().min(0).optional(),
+  teacherMarkConfidence: z.number().min(0).max(1),
+  answerMatchConfidence: z.number().min(0).max(1),
+  judgement: z.enum(mistakeJudgements),
+  isPartialCredit: z.boolean(),
+  needsConfirmation: z.boolean(),
+  evidenceSummary: z.string().min(1),
+  studentAnswerLocation: z.string().min(1).optional()
+});
+
 const baseAnalysisSchema = z.object({
   sourceImageIndex: z.number().int().min(0).max(15).optional(),
   subject: z.enum(subjects),
@@ -63,7 +78,8 @@ const baseAnalysisSchema = z.object({
   }),
   practiceQuestions: z
     .array(z.object({ question: z.string().min(1), answer: z.string().min(1), hint: z.string().min(1) }))
-    .min(1)
+    .min(1),
+  gradingEvidence: gradingEvidenceSchema.optional()
 });
 
 const analysisSchema = baseAnalysisSchema.extend({
@@ -153,7 +169,7 @@ function buildPrompt(input: AnalyzeInput) {
     "请分析图片中的错题或习题照片，输出严格 JSON，不要输出 Markdown，不要输出解释性前后缀。",
     "如果图片是一整张试卷或多页试卷，请找出所有能识别出的错题；每一道错题都要单独分析，不要只分析第一题。",
     "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
-    "analyses 每个元素必须完全符合字段：sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation。",
+    "analyses 每个元素必须完全符合字段：sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
     "sourceImageIndex 表示这道错题来自第几张上传图片，图片索引从 0 开始；无法判断时填 0。",
     "subject 必须是：语文、数学、英语、物理、化学、生物、历史、地理、道德与法治之一。",
     "grade 必须是：七年级、八年级、九年级之一。",
@@ -161,6 +177,12 @@ function buildPrompt(input: AnalyzeInput) {
     "knowledgePoints 的格式必须是对象数组，例如 [{\"name\":\"一次函数图像与性质\",\"confidence\":0.9}]。",
     "archetype 必须是对象，包含 title, pattern, solutionTemplate, commonTraps。",
     "practiceQuestions 给 1 到 3 道同类练习，必须是对象数组，每道包含 question, answer, hint。",
+    "gradingEvidence 必须是对象，用混合策略判断错题：先识别老师批改标记，再独立完整解题并和学生答案对比。",
+    "识别老师批改标记时要特别关注打叉、半勾、半对、扣分、圈画、问号；markType 只能是 check、cross、partial、deduction、circle、question、none、unknown。",
+    "对计算题和解答题，必须寻找可能离题干较远的学生答案区域、草稿区、续写区，并把 studentAnswerLocation 写清楚。",
+    "judgement 只能是 wrong、partial、suspected、correct、unknown；半勾、扣分、步骤前半正确后半错误应输出 partial，needsConfirmation 视图像清晰度决定。",
+    "teacherMarkConfidence 和 answerMatchConfidence 都是 0 到 1 的数字；isPartialCredit 表示是否部分得分；evidenceSummary 用一句话说明判定依据。",
+    "不要把明显全对的题目放进 analyses；如果老师标记不清或字迹涂改严重但疑似出错，可以输出 suspected 并设置 needsConfirmation 为 true。",
     "不要用省略号，不要用字符串替代对象，不要输出 <think>。",
     "讲解要适合孩子阅读，深入浅出，但不要涉及游戏、娱乐网站、闲聊内容。",
     "如果用户未提供学科或年级，请根据图片文字、题型、章节和知识点自动判断。",
@@ -185,13 +207,16 @@ function buildRepairPrompt(content: string, input: AnalyzeInput) {
     "所有 JSON 属性名必须使用英文双引号，所有字符串也必须使用英文双引号。",
     "禁止输出 JavaScript 对象、单引号、尾随逗号、注释或任何 JSON 之外的文字。",
     "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
-    "analyses 每个元素字段必须是：sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation。",
+    "analyses 每个元素字段必须是：sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
     "sourceImageIndex 表示这道错题来自第几张上传图片，图片索引从 0 开始；无法判断时填 0。",
     "subject 必须是：语文、数学、英语、物理、化学、生物、历史、地理、道德与法治之一。",
     "grade 必须是：七年级、八年级、九年级之一。",
     "knowledgePoints 必须是对象数组，格式如 [{\"name\":\"知识点\",\"confidence\":0.8}]。",
     "archetype 必须是对象，包含 title, pattern, solutionTemplate, commonTraps。",
     "practiceQuestions 必须是对象数组，每项包含 question, answer, hint。",
+    "gradingEvidence 必须是对象，包含 markType, markText, deductedScore, teacherMarkConfidence, answerMatchConfidence, judgement, isPartialCredit, needsConfirmation, evidenceSummary, studentAnswerLocation。",
+    "markType 只能是 check、cross、partial、deduction、circle、question、none、unknown；judgement 只能是 wrong、partial、suspected、correct、unknown。",
+    "必须体现混合策略：识别老师批改标记，同时独立完整解题并对比学生答案，尤其保留半勾、扣分、远距离学生答案区域的信息。",
     "如果用户未提供学科或年级，请根据原始内容和图片信息自动判断。",
     "年级判断优先看图片中的明确文字：初一/七年级/7年级/Grade 7 => 七年级；初二/八年级/8年级/Grade 8 => 八年级；初三/九年级/9年级/Grade 9 => 九年级。",
     "如果没有明确年级文字，再根据教材章节和题目难度推断；不要因为示例、学生档案或系统默认值选择八年级数学。",
@@ -233,6 +258,105 @@ function normalizeRequiredStringField(record: Record<string, unknown>, key: stri
   }
 }
 
+function normalizeConfidence(value: unknown, fallback: number) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.min(1, Math.max(0, value > 1 ? value / 100 : value));
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value.replace("%", ""));
+    if (Number.isFinite(parsed)) {
+      return Math.min(1, Math.max(0, parsed > 1 ? parsed / 100 : parsed));
+    }
+  }
+
+  return fallback;
+}
+
+function normalizeOptionalNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, value);
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : undefined;
+  }
+
+  return undefined;
+}
+
+function normalizeMarkType(value: unknown): (typeof gradingMarkTypes)[number] {
+  const text = String(value ?? "").trim().toLowerCase();
+  if ((gradingMarkTypes as readonly string[]).includes(text)) {
+    return text as (typeof gradingMarkTypes)[number];
+  }
+
+  if (/半勾|半对|部分|partial/.test(text)) return "partial";
+  if (/扣分|扣\d|deduct|minus/.test(text)) return "deduction";
+  if (/打叉|叉|错|×|✕|✗|x\b|cross/.test(text)) return "cross";
+  if (/打勾|勾|对|√|✓|check/.test(text)) return "check";
+  if (/圈|圆圈|circle/.test(text)) return "circle";
+  if (/问号|\?|question/.test(text)) return "question";
+  if (/无|没有|none|no mark/.test(text)) return "none";
+  return "unknown";
+}
+
+function normalizeJudgement(value: unknown): (typeof mistakeJudgements)[number] {
+  const text = String(value ?? "").trim().toLowerCase();
+  if ((mistakeJudgements as readonly string[]).includes(text)) {
+    return text as (typeof mistakeJudgements)[number];
+  }
+
+  if (/半对|部分|半错|partial/.test(text)) return "partial";
+  if (/疑似|不确定|待确认|suspect/.test(text)) return "suspected";
+  if (/全对|正确|对\b|correct/.test(text)) return "correct";
+  if (/错误|错|wrong|incorrect/.test(text)) return "wrong";
+  return "unknown";
+}
+
+function normalizeBoolean(value: unknown, fallback: boolean) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (/^(true|yes|1|是|需要|需|有)$/i.test(value.trim())) return true;
+    if (/^(false|no|0|否|不需要|无|没有)$/i.test(value.trim())) return false;
+  }
+  return fallback;
+}
+
+function normalizeGradingEvidence(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+
+  const evidence = { ...(value as Record<string, unknown>) };
+  evidence.markType = normalizeMarkType(evidence.markType ?? evidence.mark ?? evidence.teacherMark ?? evidence.markText);
+  evidence.judgement = normalizeJudgement(evidence.judgement ?? evidence.result ?? evidence.conclusion);
+  evidence.teacherMarkConfidence = normalizeConfidence(evidence.teacherMarkConfidence, 0);
+  evidence.answerMatchConfidence = normalizeConfidence(evidence.answerMatchConfidence, 0.5);
+  evidence.isPartialCredit =
+    normalizeBoolean(evidence.isPartialCredit, evidence.markType === "partial" || evidence.judgement === "partial");
+  evidence.needsConfirmation = normalizeBoolean(evidence.needsConfirmation, evidence.judgement === "suspected");
+
+  const deductedScore = normalizeOptionalNumber(evidence.deductedScore);
+  if (deductedScore === undefined) {
+    delete evidence.deductedScore;
+  } else {
+    evidence.deductedScore = deductedScore;
+  }
+
+  if (typeof evidence.markText !== "string" || evidence.markText.trim().length === 0) {
+    delete evidence.markText;
+  }
+
+  if (typeof evidence.studentAnswerLocation !== "string" || evidence.studentAnswerLocation.trim().length === 0) {
+    delete evidence.studentAnswerLocation;
+  }
+
+  normalizeRequiredStringField(evidence, "evidenceSummary", "根据老师批改标记和学生答案对比，判断这道题需要复习。");
+  return evidence;
+}
+
 function normalizeSingleAnalysisShape(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return value;
@@ -247,6 +371,7 @@ function normalizeSingleAnalysisShape(value: unknown): unknown {
   normalizeRequiredStringField(record, "mistakeReason", "未识别到明确错因，建议先核对题目条件和作答步骤。");
   normalizeRequiredStringField(record, "studentFriendlyExplanation", "先把题干条件圈出来，再一步一步核对自己的作答。");
   normalizeRequiredStringField(record, "example", "可以先用同类基础题练习，再回到原题。");
+  record.gradingEvidence = normalizeGradingEvidence(record.gradingEvidence);
 
   if (Array.isArray(record.knowledgePoints)) {
     record.knowledgePoints = record.knowledgePoints.map((point) => {

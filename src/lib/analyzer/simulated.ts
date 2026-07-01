@@ -26,6 +26,17 @@ export async function analyzeWithSimulation(input: AnalyzeInput): Promise<Analys
       recognizedText: "已知一次函数 y = 2x - 3，判断函数图像经过的象限，并说明理由。",
       studentAnswer: "学生只判断了 b = -3，所以认为图像只经过第四象限。",
       correctAnswer: "函数图像经过第一、三、四象限。",
+      gradingEvidence: {
+        markType: "partial",
+        markText: "半勾，理由不完整",
+        teacherMarkConfidence: 0.82,
+        answerMatchConfidence: 0.76,
+        judgement: "partial",
+        isPartialCredit: true,
+        needsConfirmation: false,
+        evidenceSummary: "老师给了半勾，孩子只判断了截距，没有完成 k 与 b 的综合判断。",
+        studentAnswerLocation: "题目右侧作答区"
+      },
       knowledgePoints: [{ name: "一次函数图像与性质", confidence: 0.92 }],
       mistakeReason: "只关注截距 b，没有结合 k 的正负判断图像上升趋势。",
       studentFriendlyExplanation:
@@ -97,6 +108,17 @@ export async function analyzeWithSimulation(input: AnalyzeInput): Promise<Analys
     recognizedText: "There ____ a book and two pens on the desk. A. is B. are C. am",
     studentAnswer: "学生选择了 B. are。",
     correctAnswer: "正确答案是 A. is。",
+    gradingEvidence: {
+      markType: "cross",
+      markText: "老师打叉",
+      teacherMarkConfidence: 0.88,
+      answerMatchConfidence: 0.9,
+      judgement: "wrong",
+      isPartialCredit: false,
+      needsConfirmation: false,
+      evidenceSummary: "老师批改处有叉号，学生选 B，和正确答案 A 不一致。",
+      studentAnswerLocation: "选择题选项旁"
+    },
     knowledgePoints: [{ name: "There be 句型就近原则", confidence: 0.92 }],
     mistakeReason: "只看到后面有 two pens，就以为要用 are，没有看空格后最近的主语 a book。",
     studentFriendlyExplanation:

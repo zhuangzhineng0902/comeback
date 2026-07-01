@@ -1,7 +1,7 @@
 import React from "react";
 
 import { RichExplanationCard } from "@/components/RichExplanationCard";
-import type { AnalysisOutput, GapSeverity } from "@/lib/types";
+import type { AnalysisOutput, GapSeverity, GradingEvidence, GradingMarkType, MistakeJudgement } from "@/lib/types";
 
 type AnalysisCardProps = {
   analysis: AnalysisOutput;
@@ -28,6 +28,80 @@ const severityCopy: Record<GapSeverity, { label: string; className: string }> = 
   }
 };
 
+const judgementCopy: Record<MistakeJudgement, { label: string; className: string }> = {
+  wrong: { label: "明确错误", className: "border-red-200 bg-red-50 text-red-700" },
+  partial: { label: "半对/部分得分", className: "border-amber-200 bg-amber-50 text-amber-800" },
+  suspected: { label: "疑似错题", className: "border-orange-200 bg-orange-50 text-orange-800" },
+  correct: { label: "疑似已对", className: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  unknown: { label: "待判断", className: "border-slate-200 bg-slate-50 text-slate-700" }
+};
+
+const markTypeCopy: Record<GradingMarkType, string> = {
+  check: "老师打勾",
+  cross: "老师打叉",
+  partial: "半勾/半对",
+  deduction: "扣分标记",
+  circle: "圈画标记",
+  question: "问号标记",
+  none: "未见批改",
+  unknown: "批改不清"
+};
+
+function formatConfidence(value: number) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function GradingEvidencePanel({ evidence }: { evidence: GradingEvidence }) {
+  const judgement = judgementCopy[evidence.judgement];
+
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs font-medium text-amber-800">判定依据</p>
+        <span className={`rounded-md border px-2 py-1 text-xs font-medium ${judgement.className}`}>
+          {judgement.label}
+        </span>
+        {evidence.isPartialCredit ? (
+          <span className="rounded-md border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-amber-800">
+            半对/部分得分
+          </span>
+        ) : null}
+        {evidence.needsConfirmation ? (
+          <span className="rounded-md border border-orange-300 bg-white px-2 py-1 text-xs font-medium text-orange-800">
+            需人工确认
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-2 text-sm leading-6 text-amber-950">{evidence.evidenceSummary}</p>
+      <dl className="mt-3 grid gap-2 text-xs text-amber-900 sm:grid-cols-2">
+        <div>
+          <dt className="font-medium">批改标记</dt>
+          <dd>{markTypeCopy[evidence.markType]}{evidence.markText ? `：${evidence.markText}` : ""}</dd>
+        </div>
+        <div>
+          <dt className="font-medium">置信度</dt>
+          <dd>
+            批改 {formatConfidence(evidence.teacherMarkConfidence)} · 答案对比{" "}
+            {formatConfidence(evidence.answerMatchConfidence)}
+          </dd>
+        </div>
+        {typeof evidence.deductedScore === "number" ? (
+          <div>
+            <dt className="font-medium">扣分</dt>
+            <dd>{evidence.deductedScore} 分</dd>
+          </div>
+        ) : null}
+        {evidence.studentAnswerLocation ? (
+          <div>
+            <dt className="font-medium">答案位置</dt>
+            <dd>{evidence.studentAnswerLocation}</dd>
+          </div>
+        ) : null}
+      </dl>
+    </div>
+  );
+}
+
 export function AnalysisCard({ analysis, gapSeverity, mode }: AnalysisCardProps) {
   const severity = severityCopy[gapSeverity];
 
@@ -51,6 +125,8 @@ export function AnalysisCard({ analysis, gapSeverity, mode }: AnalysisCardProps)
             <h2 className="text-base font-semibold text-ink">{analysis.questionType}</h2>
             <p className="mt-2 text-sm leading-6 text-slate-700">{analysis.recognizedText}</p>
           </div>
+
+          {analysis.gradingEvidence ? <GradingEvidencePanel evidence={analysis.gradingEvidence} /> : null}
 
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-md border border-slate-200 p-3">
