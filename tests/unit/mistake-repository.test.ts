@@ -76,17 +76,44 @@ describe("mistake repository", () => {
   it("marks repeated archetype mistakes as high priority", async () => {
     const analysis = await analyzeWithSimulation({ filename: "a.png" });
     await saveAnalysisAsMistake({ studentId: "default-student", imagePath: "uploads/a.png", analysis });
-    const second = await saveAnalysisAsMistake({ studentId: "default-student", imagePath: "uploads/b.png", analysis });
+    const second = await saveAnalysisAsMistake({
+      studentId: "default-student",
+      imagePath: "uploads/b.png",
+      analysis: {
+        ...analysis,
+        recognizedText: `${analysis.recognizedText} 第二次同类变式`
+      }
+    });
 
     expect(second.gap.repeatedArchetypeCount).toBe(2);
     expect(second.gap.severity).toBe("repeated_archetype");
     expect(second.gap.severityRank).toBe(3);
   });
 
+  it("does not stack error counts for the same question submitted repeatedly", async () => {
+    const analysis = await analyzeWithSimulation({ filename: "a.png", subjectHint: "数学", gradeHint: "八年级" });
+    const first = await saveAnalysisAsMistake({ studentId: "default-student", imagePath: "uploads/a.png", analysis });
+    const duplicate = await saveAnalysisAsMistake({
+      studentId: "default-student",
+      imagePath: "uploads/b.png",
+      analysis: {
+        ...analysis,
+        recognizedText: ` ${analysis.recognizedText.replace(/\s+/g, " ")} `
+      }
+    });
+    const mistakeCount = await prisma.mistake.count({ where: { studentId: "default-student" } });
+
+    expect(duplicate.mistake.id).toBe(first.mistake.id);
+    expect(duplicate.gap.errorCount).toBe(1);
+    expect(duplicate.gap.repeatedArchetypeCount).toBe(1);
+    expect(mistakeCount).toBe(1);
+  });
+
   it("marks three mistakes on one knowledge point as important without repeated archetypes", async () => {
     const analysis = await analyzeWithSimulation({ filename: "a.png" });
-    const analyses = ["母题 A", "母题 B", "母题 C"].map((title) => ({
+    const analyses = ["母题 A", "母题 B", "母题 C"].map((title, index) => ({
       ...analysis,
+      recognizedText: `${analysis.recognizedText} 不同题 ${index + 1}`,
       archetype: {
         ...analysis.archetype,
         title

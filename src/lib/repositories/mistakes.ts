@@ -8,6 +8,13 @@ export type SaveAnalysisInput = {
   analysis: AnalysisOutput;
 };
 
+function normalizeQuestionText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[，。！？；：、,.!?;:()[\]（）【】{}<>《》"'“”‘’]/g, "");
+}
+
 export async function saveAnalysisAsMistake(input: SaveAnalysisInput) {
   return prisma.$transaction(async (tx) => {
     // MVP: persist the primary detected knowledge point for each analyzed mistake.
@@ -55,6 +62,37 @@ export async function saveAnalysisAsMistake(input: SaveAnalysisInput) {
         commonTraps: JSON.stringify(input.analysis.archetype.commonTraps)
       }
     });
+
+    const normalizedQuestion = normalizeQuestionText(input.analysis.recognizedText);
+    const existingMistakes = await tx.mistake.findMany({
+      where: {
+        studentId: input.studentId,
+        subject: input.analysis.subject,
+        grade: input.analysis.grade
+      },
+      include: {
+        mistakeArchetypes: true,
+        tutorMessages: true
+      }
+    });
+    const duplicateMistake = existingMistakes.find(
+      (mistake) => normalizeQuestionText(mistake.recognizedText) === normalizedQuestion
+    );
+
+    if (duplicateMistake) {
+      const existingGap = await tx.knowledgeGap.findUnique({
+        where: {
+          studentId_knowledgePointId: {
+            studentId: input.studentId,
+            knowledgePointId: knowledgePoint.id
+          }
+        }
+      });
+
+      if (existingGap) {
+        return { mistake: duplicateMistake, gap: existingGap, knowledgePoint, archetype };
+      }
+    }
 
     const mistake = await tx.mistake.create({
       data: {
