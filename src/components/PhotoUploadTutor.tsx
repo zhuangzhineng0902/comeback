@@ -1,7 +1,7 @@
 "use client";
 
 import { LoaderCircle, Send, Upload, X } from "lucide-react";
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 import { AnalysisCard } from "@/components/AnalysisCard";
 import { grades, subjects, type AnalysisOutput, type GapSeverity, type Grade, type Subject } from "@/lib/types";
@@ -27,6 +27,11 @@ type ImageGroup = {
   image: UploadedImage;
   analyses: AnalysisOutput[];
   savedMistakes: Array<{ mistakeId: string; gapSeverity: GapSeverity }>;
+};
+
+type HistoryEntry = AnalyzeResponse & {
+  messages?: ChatMessage[];
+  createdAt?: string;
 };
 
 type ChatMessage = {
@@ -57,6 +62,23 @@ export function PhotoUploadTutor() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isChatting, setIsChatting] = useState(false);
   const [previewImage, setPreviewImage] = useState<UploadedImage | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const response = await fetch("/api/history");
+      const data = await readJson(response);
+      if (response.ok && Array.isArray(data.history)) {
+        setHistory(data.history as HistoryEntry[]);
+      }
+    } catch {
+      // History is optional; upload and chat should remain usable if it cannot load.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
 
   async function analyze() {
     if (files.length === 0) {
@@ -100,6 +122,7 @@ export function PhotoUploadTutor() {
               : `我已经登记 ${analyses.length} 道错题。先从第 1 题「${analyses[0]?.knowledgePoints[0]?.name ?? analyses[0]?.questionType ?? "错题"}」开始复习。`
         }
       ]);
+      void loadHistory();
     } catch {
       setError("网络连接异常，请稍后重试。");
     } finally {
@@ -139,6 +162,16 @@ export function PhotoUploadTutor() {
             }
           ]
         : [];
+
+  function restoreHistory(entry: HistoryEntry) {
+    setResult(entry);
+    setMessages(
+      entry.messages?.length
+        ? entry.messages
+        : [{ role: "assistant", content: entry.analysis.studentFriendlyExplanation }]
+    );
+    setError("");
+  }
 
   async function sendQuestion() {
     const trimmed = question.trim();
@@ -322,6 +355,37 @@ export function PhotoUploadTutor() {
       </section>
 
       <aside className="flex min-h-[520px] flex-col rounded-lg border border-slate-200 bg-white shadow-sm">
+        <section className="border-b border-slate-200 p-4">
+          <h2 className="text-base font-semibold text-ink">历史记录</h2>
+          <p className="mt-1 text-sm text-slate-500">最近的 AI 分析和对话。</p>
+          {history.length === 0 ? (
+            <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">暂无历史记录。</p>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {history.map((entry) => (
+                <button
+                  key={entry.mistakeId}
+                  type="button"
+                  aria-label={`查看历史 ${entry.analysis.questionType}`}
+                  onClick={() => restoreHistory(entry)}
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-slate-400 hover:bg-white"
+                >
+                  <span className="block text-xs text-slate-500">
+                    {entry.analysis.grade} · {entry.analysis.subject}
+                    {entry.createdAt ? ` · ${new Date(entry.createdAt).toLocaleDateString("zh-CN")}` : ""}
+                  </span>
+                  <span className="mt-1 block truncate text-sm font-medium text-ink">
+                    {entry.analysis.questionType}
+                  </span>
+                  <span className="mt-1 block line-clamp-2 text-xs leading-5 text-slate-600">
+                    {entry.analysis.mistakeReason}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+
         <div className="border-b border-slate-200 p-4">
           <h2 className="text-base font-semibold text-ink">继续问老师</h2>
           <p className="mt-1 text-sm text-slate-500">只回答学习相关问题。</p>

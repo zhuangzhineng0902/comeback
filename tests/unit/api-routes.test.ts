@@ -490,6 +490,71 @@ describe("api routes", () => {
     });
   });
 
+  it("returns analysis and chat history for the tutor home page", async () => {
+    prismaMock.mistake.findMany.mockResolvedValue([
+      {
+        id: "mistake-1",
+        imagePath: "uploads/paper.png",
+        subject: "数学",
+        grade: "七年级",
+        questionType: "解答题",
+        recognizedText: "2x + 3 = 7",
+        studentAnswer: "x=3",
+        correctAnswer: "x=2",
+        explanation: "先移项再除以系数。",
+        mistakeReason: "移项规则不熟。",
+        masteryStatus: "new",
+        createdAt: new Date("2026-07-01T08:00:00.000Z"),
+        updatedAt: new Date("2026-07-01T08:00:00.000Z"),
+        tutorMessages: [
+          { id: "msg-1", role: "assistant", content: "先移项再除以系数。", createdAt: new Date("2026-07-01T08:00:00.000Z") },
+          { id: "msg-2", role: "user", content: "为什么要减 3？", createdAt: new Date("2026-07-01T08:01:00.000Z") }
+        ],
+        mistakeArchetypes: [
+          {
+            archetype: {
+              title: "一元一次方程",
+              pattern: "ax+b=c",
+              solutionTemplate: "移项，合并，系数化 1",
+              commonTraps: "[\"移项忘记变号\"]"
+            }
+          }
+        ]
+      }
+    ]);
+    const { GET } = await import("@/app/api/history/route");
+
+    const response = await GET();
+
+    await expect(response.json()).resolves.toMatchObject({
+      history: [
+        {
+          mistakeId: "mistake-1",
+          analysis: {
+            subject: "数学",
+            grade: "七年级",
+            questionType: "解答题",
+            archetype: { commonTraps: ["移项忘记变号"] }
+          },
+          uploadedImages: [{ index: 0, filename: "paper.png", url: "/api/uploads/paper.png" }],
+          messages: [
+            { role: "assistant", content: "先移项再除以系数。" },
+            { role: "user", content: "为什么要减 3？" }
+          ]
+        }
+      ]
+    });
+    expect(prismaMock.mistake.findMany).toHaveBeenCalledWith({
+      where: { studentId: "default-student" },
+      include: {
+        tutorMessages: { orderBy: { createdAt: "asc" } },
+        mistakeArchetypes: { include: { archetype: true } }
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20
+    });
+  });
+
   it("orders knowledge gaps by severity rank and recency", async () => {
     prismaMock.knowledgeGap.findMany.mockResolvedValue([{ id: "gap-1" }]);
     const { GET } = await import("@/app/api/knowledge-gaps/route");

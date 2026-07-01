@@ -135,4 +135,77 @@ describe("PhotoUploadTutor", () => {
     expect(screen.getByRole("img", { name: "试卷.png 原图" })).toBeTruthy();
     expect(screen.getByText("我已经登记 2 道错题。先从第 1 题「There be 句型」开始复习。")).toBeTruthy();
   });
+
+  it("loads analysis and chat history and restores a selected record", async () => {
+    const historyAnalysis = {
+      subject: "数学",
+      grade: "七年级",
+      questionType: "一元一次方程",
+      recognizedText: "2x + 3 = 7",
+      studentAnswer: "x=3",
+      correctAnswer: "x=2",
+      knowledgePoints: [{ name: "一元一次方程", confidence: 0.9 }],
+      mistakeReason: "移项规则不熟。",
+      studentFriendlyExplanation: "先两边同时减 3，再除以 2。",
+      example: "3x+1=7",
+      archetype: {
+        title: "一元一次方程母题",
+        pattern: "ax+b=c",
+        solutionTemplate: "移项，合并，系数化 1",
+        commonTraps: ["移项忘记变号"]
+      },
+      practiceQuestions: [{ question: "x+1=3", answer: "x=2", hint: "两边减 1。" }]
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === "/api/history") {
+          return new Response(
+            JSON.stringify({
+              history: [
+                {
+                  mistakeId: "mistake-history-1",
+                  mode: "api",
+                  analysis: historyAnalysis,
+                  analyses: [historyAnalysis],
+                  gapSeverity: "normal",
+                  savedMistakes: [{ mistakeId: "mistake-history-1", gapSeverity: "normal" }],
+                  uploadedImages: [{ index: 0, filename: "历史试卷.png", url: "/api/uploads/history-paper.png" }],
+                  imageGroups: [
+                    {
+                      image: { index: 0, filename: "历史试卷.png", url: "/api/uploads/history-paper.png" },
+                      analyses: [historyAnalysis],
+                      savedMistakes: [{ mistakeId: "mistake-history-1", gapSeverity: "normal" }]
+                    }
+                  ],
+                  messages: [
+                    { role: "assistant", content: "先两边同时减 3，再除以 2。" },
+                    { role: "user", content: "为什么要同时减 3？" },
+                    { role: "assistant", content: "因为等式两边要保持平衡。" }
+                  ],
+                  createdAt: "2026-07-01T08:00:00.000Z"
+                }
+              ]
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        return new Response(JSON.stringify({ error: "unexpected request" }), { status: 500 });
+      })
+    );
+
+    render(<PhotoUploadTutor />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "查看历史 一元一次方程" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "查看历史 一元一次方程" }));
+
+    expect(screen.getAllByText("一元一次方程").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("为什么要同时减 3？")).toBeTruthy();
+    expect(screen.getByText("因为等式两边要保持平衡。")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "历史试卷.png 原图预览" })).toBeTruthy();
+  });
 });
