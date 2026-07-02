@@ -1,4 +1,4 @@
-import type { PaperVisionBox, PaperVisionContext, PaperVisionTextBlock } from "@/lib/types";
+import type { PaperVisionBox, PaperVisionContext, PaperVisionQuestionCandidate, PaperVisionTextBlock } from "@/lib/types";
 
 type OcrInput = {
   filename: string;
@@ -60,6 +60,24 @@ function normalizeBlock(value: unknown): PaperVisionTextBlock | null {
   };
 }
 
+function normalizeQuestionCandidate(value: unknown): PaperVisionQuestionCandidate | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const questionId = record.questionId ?? record.id ?? record.number;
+  const text = record.text ?? record.content ?? record.question;
+  const confidence = normalizeNumber(record.confidence ?? record.score ?? record.probability);
+
+  return {
+    questionId: typeof questionId === "string" || typeof questionId === "number" ? String(questionId).trim() : undefined,
+    text: typeof text === "string" && text.trim().length > 0 ? text.trim() : undefined,
+    bbox: normalizeBox(record.bbox ?? record.box ?? record.position),
+    confidence
+  };
+}
+
 function extractBlocks(payload: Record<string, unknown>) {
   const data = payload.data && typeof payload.data === "object" ? (payload.data as Record<string, unknown>) : undefined;
   const candidates = [
@@ -82,10 +100,31 @@ function extractBlocks(payload: Record<string, unknown>) {
   return [];
 }
 
+function extractQuestionCandidates(payload: Record<string, unknown>) {
+  const data = payload.data && typeof payload.data === "object" ? (payload.data as Record<string, unknown>) : undefined;
+  const candidates = [
+    payload.questionCandidates,
+    payload.questions,
+    payload.questionBlocks,
+    data?.questionCandidates,
+    data?.questions,
+    data?.questionBlocks
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate.map(normalizeQuestionCandidate).filter((item): item is PaperVisionQuestionCandidate => Boolean(item));
+    }
+  }
+
+  return [];
+}
+
 function normalizeOcrPayload(payload: unknown, input: OcrInput): PaperVisionContext {
   const record = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : {};
   const blocks = extractBlocks(record);
   const rawText = collectRawText(record, blocks);
+  const questionCandidates = extractQuestionCandidates(record);
 
   return {
     sourceImageIndex: input.sourceImageIndex,
@@ -94,7 +133,7 @@ function normalizeOcrPayload(payload: unknown, input: OcrInput): PaperVisionCont
     summary: blocks.length > 0 ? `识别 ${blocks.length} 个文字块` : "OCR 未识别到有效文字块",
     rawText,
     textBlocks: blocks.slice(0, 80),
-    questionCandidates: []
+    questionCandidates: questionCandidates.slice(0, 40)
   };
 }
 

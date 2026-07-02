@@ -10,6 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "ocr:dev": "python3 ocr_service/app.py",
+    "ocr:test": "PYTHONPATH=ocr_service python3 -m unittest discover -s ocr_service/tests",
     "prisma:generate": "node scripts/prisma-generate.mjs",
     "prisma:migrate": "node scripts/prisma-migrate.mjs",
     "prisma:seed": "node scripts/prisma-seed.mjs"
