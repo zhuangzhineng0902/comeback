@@ -4,7 +4,15 @@ import { LoaderCircle, Send, Upload, X } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 
 import { AnalysisCard } from "@/components/AnalysisCard";
-import { grades, subjects, type AnalysisOutput, type GapSeverity, type Grade, type Subject } from "@/lib/types";
+import {
+  grades,
+  subjects,
+  type AnalysisOutput,
+  type GapSeverity,
+  type Grade,
+  type PaperVisionContext,
+  type Subject
+} from "@/lib/types";
 
 type AnalyzeResponse = {
   mode: "api" | "simulation";
@@ -14,6 +22,7 @@ type AnalyzeResponse = {
   gapSeverity: GapSeverity;
   savedMistakes?: Array<{ mistakeId: string; gapSeverity: GapSeverity }>;
   uploadedImages?: UploadedImage[];
+  paperVisionContexts?: PaperVisionContext[];
   imageGroups?: ImageGroup[];
 };
 
@@ -25,6 +34,7 @@ type UploadedImage = {
 
 type ImageGroup = {
   image: UploadedImage;
+  paperVisionContext?: PaperVisionContext;
   analyses: AnalysisOutput[];
   savedMistakes: Array<{ mistakeId: string; gapSeverity: GapSeverity }>;
 };
@@ -40,6 +50,37 @@ type ChatMessage = {
 };
 
 const defaultAssistantMessage = "先上传一张错题照片，我会把错因、知识点和母题整理出来。";
+
+function PaperVisionPanel({ context }: { context: PaperVisionContext }) {
+  const sampleBlocks = context.textBlocks.slice(0, 3);
+
+  return (
+    <div className="rounded-md border border-indigo-200 bg-indigo-50 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs font-medium text-indigo-800">OCR 证据</p>
+        <span className="rounded-md border border-indigo-200 bg-white px-2 py-1 text-xs text-indigo-800">
+          {context.summary}
+        </span>
+        {context.status !== "available" ? (
+          <span className="rounded-md border border-amber-200 bg-white px-2 py-1 text-xs text-amber-800">
+            {context.status === "failed" ? "OCR 失败" : "未识别到文字"}
+          </span>
+        ) : null}
+      </div>
+      {sampleBlocks.length > 0 ? (
+        <div className="mt-2 space-y-1 text-xs leading-5 text-indigo-950">
+          {sampleBlocks.map((block, index) => (
+            <p key={`${block.text}-${index}`} className="line-clamp-1">
+              {block.text}
+            </p>
+          ))}
+        </div>
+      ) : context.rawText ? (
+        <p className="mt-2 line-clamp-2 text-xs leading-5 text-indigo-950">{context.rawText}</p>
+      ) : null}
+    </div>
+  );
+}
 
 async function readJson(response: Response) {
   try {
@@ -156,6 +197,7 @@ export function PhotoUploadTutor() {
         ? [
             {
               image: result.uploadedImages?.[0],
+              paperVisionContext: result.paperVisionContexts?.[0],
               analyses: result.analyses ?? [result.analysis],
               savedMistakes:
                 result.savedMistakes ?? [{ mistakeId: result.mistakeId, gapSeverity: result.gapSeverity }]
@@ -307,7 +349,7 @@ export function PhotoUploadTutor() {
                 className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
               >
                 {group.image ? (
-                  <div>
+                  <div className="space-y-3">
                     <button
                       type="button"
                       aria-label={`查看 ${group.image.filename} 原图`}
@@ -321,6 +363,7 @@ export function PhotoUploadTutor() {
                       />
                     </button>
                     <p className="mt-2 text-xs text-slate-500">点击图片查看原图：{group.image.filename}</p>
+                    {group.paperVisionContext ? <PaperVisionPanel context={group.paperVisionContext} /> : null}
                   </div>
                 ) : null}
 

@@ -57,6 +57,32 @@ export type GradingEvidence = {
   studentAnswerLocation?: string;
 };
 
+export type PaperVisionBox = [number, number, number, number];
+
+export type PaperVisionTextBlock = {
+  text: string;
+  bbox?: PaperVisionBox;
+  confidence?: number;
+  role?: "question" | "studentAnswer" | "teacherMark" | "other";
+};
+
+export type PaperVisionQuestionCandidate = {
+  questionId?: string;
+  text?: string;
+  bbox?: PaperVisionBox;
+  confidence?: number;
+};
+
+export type PaperVisionContext = {
+  sourceImageIndex: number;
+  engine: "ocr" | "autocut" | "vision" | "unknown";
+  status: "available" | "unavailable" | "failed";
+  summary: string;
+  rawText?: string;
+  textBlocks: PaperVisionTextBlock[];
+  questionCandidates: PaperVisionQuestionCandidate[];
+};
+
 export type AnalysisOutput = {
   sourceImageIndex?: number;
   subject: Subject;

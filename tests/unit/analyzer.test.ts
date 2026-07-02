@@ -715,6 +715,50 @@ describe("simulated analyzer", () => {
     expect(prompt).not.toContain("用户提示年级：八年级");
   });
 
+  it("includes OCR paper vision context in the MiniMax prompt", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(minimaxAnalysis) } }]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await analyzeMistake({
+      filename: "paper.png",
+      mimeType: "image/png",
+      imageBase64: "image-bytes",
+      paperVisionContexts: [
+        {
+          sourceImageIndex: 0,
+          engine: "ocr",
+          status: "available",
+          summary: "识别 2 个文字块",
+          rawText: "1. There ____ a book on the desk. 学生答案 B",
+          textBlocks: [
+            { text: "There ____ a book on the desk.", bbox: [10, 20, 300, 60], confidence: 0.96 },
+            { text: "学生答案 B", bbox: [320, 80, 420, 120], confidence: 0.88 }
+          ],
+          questionCandidates: [
+            { questionId: "1", text: "There ____ a book on the desk.", bbox: [10, 20, 420, 140], confidence: 0.9 }
+          ]
+        }
+      ]
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as {
+      messages: Array<{ content: Array<{ type: string; text?: string }> }>;
+    };
+    const prompt = requestBody.messages[0].content.find((item) => item.type === "text")?.text ?? "";
+    expect(prompt).toContain("OCR 前置识别结果");
+    expect(prompt).toContain("There ____ a book on the desk.");
+    expect(prompt).toContain("[10,20,300,60]");
+    expect(prompt).toContain("优先用 OCR 文本校对题干");
+  });
+
   it("allows overriding the MiniMax base URL for compatible deployments", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     process.env.MINIMAX_BASE_URL = "https://example.test/v1";

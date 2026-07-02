@@ -6,8 +6,9 @@ import { promisify } from "node:util";
 import { NextResponse } from "next/server";
 import { analyzeMistake } from "@/lib/analyzer";
 import { analyzeWithSimulation } from "@/lib/analyzer/simulated";
+import { analyzeImageWithOcr } from "@/lib/ocr/client";
 import { saveAnalysisAsMistake } from "@/lib/repositories/mistakes";
-import { grades, subjects, type Grade, type Subject } from "@/lib/types";
+import { grades, subjects, type Grade, type PaperVisionContext, type Subject } from "@/lib/types";
 
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 const maxUploadBytes = 8 * 1024 * 1024;
@@ -36,6 +37,10 @@ async function convertHeicToJpeg(inputPath: string, outputPath: string) {
 
 function isMiniMaxFailure(error: unknown) {
   return error instanceof Error && error.message.includes("MiniMax");
+}
+
+function isPaperVisionContext(context: PaperVisionContext | null | undefined): context is PaperVisionContext {
+  return context !== null && context !== undefined;
 }
 
 export async function POST(request: Request) {
@@ -104,6 +109,18 @@ export async function POST(request: Request) {
 
   try {
     const firstImage = uploadedImages[0];
+    const paperVisionContexts = (
+      await Promise.all(
+        uploadedImages.map((image, index) =>
+          analyzeImageWithOcr({
+            filename: image.filename,
+            mimeType: image.analysisMimeType,
+            imageBase64: image.analysisImageBase64,
+            sourceImageIndex: index
+          })
+        )
+      )
+    ).filter(isPaperVisionContext);
     const analyzeInput = {
       filename: uploadedImages.map((image) => image.filename).join(", "),
       mimeType: firstImage.analysisMimeType,
@@ -113,6 +130,7 @@ export async function POST(request: Request) {
         mimeType: image.analysisMimeType,
         imageBase64: image.analysisImageBase64
       })),
+      paperVisionContexts: paperVisionContexts.length > 0 ? paperVisionContexts : undefined,
       subjectHint: subject,
       gradeHint: grade
     };
@@ -155,6 +173,7 @@ export async function POST(request: Request) {
     const firstSaved = savedMistakes[0];
     const imageGroups = imageSummaries.map((image) => ({
       image,
+      paperVisionContext: paperVisionContexts.find((context) => context.sourceImageIndex === image.index),
       analyses: [] as typeof analyses,
       savedMistakes: [] as typeof savedMistakes
     }));
@@ -178,6 +197,7 @@ export async function POST(request: Request) {
       gapSeverity: firstSaved.gapSeverity,
       savedMistakes,
       uploadedImages: imageSummaries,
+      paperVisionContexts,
       imageGroups
     });
   } catch (error) {

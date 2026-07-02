@@ -101,9 +101,35 @@ describe("PhotoUploadTutor", () => {
               { ...baseAnalysis, questionType: "第二道填空题", recognizedText: "There ____ two pens." }
             ],
             uploadedImages: [{ index: 0, filename: "试卷.png", url: "/api/uploads/test-paper.png" }],
+            paperVisionContexts: [
+              {
+                sourceImageIndex: 0,
+                engine: "ocr",
+                status: "available",
+                summary: "识别 2 个文字块",
+                rawText: "There ____ a book on the desk. 学生答案 are",
+                textBlocks: [
+                  { text: "There ____ a book on the desk.", bbox: [10, 20, 300, 60], confidence: 0.96 },
+                  { text: "学生答案 are", bbox: [320, 80, 420, 120], confidence: 0.88 }
+                ],
+                questionCandidates: []
+              }
+            ],
             imageGroups: [
               {
                 image: { index: 0, filename: "试卷.png", url: "/api/uploads/test-paper.png" },
+                paperVisionContext: {
+                  sourceImageIndex: 0,
+                  engine: "ocr",
+                  status: "available",
+                  summary: "识别 2 个文字块",
+                  rawText: "There ____ a book on the desk. 学生答案 are",
+                  textBlocks: [
+                    { text: "There ____ a book on the desk.", bbox: [10, 20, 300, 60], confidence: 0.96 },
+                    { text: "学生答案 are", bbox: [320, 80, 420, 120], confidence: 0.88 }
+                  ],
+                  questionCandidates: []
+                },
                 analyses: [
                   baseAnalysis,
                   { ...baseAnalysis, questionType: "第二道填空题", recognizedText: "There ____ two pens." }
@@ -145,6 +171,9 @@ describe("PhotoUploadTutor", () => {
     expect(screen.getAllByText("半对/部分得分").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("需人工确认").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("老师批改处有半勾，学生答案只完成前半步。").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("OCR 证据")).toBeTruthy();
+    expect(screen.getByText("识别 2 个文字块")).toBeTruthy();
+    expect(screen.getAllByText("There ____ a book on the desk.").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("img", { name: "试卷.png 原图预览" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "查看 试卷.png 原图" }));
     expect(screen.getByRole("dialog", { name: "试卷.png 原图" })).toBeTruthy();

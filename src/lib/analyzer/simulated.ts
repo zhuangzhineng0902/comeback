@@ -1,4 +1,4 @@
-import type { AnalysisOutput, Grade, Subject } from "@/lib/types";
+import type { AnalysisOutput, Grade, PaperVisionContext, Subject } from "@/lib/types";
 
 export type AnalyzeInput = {
   filename: string;
@@ -9,6 +9,7 @@ export type AnalyzeInput = {
     mimeType: string;
     imageBase64: string;
   }>;
+  paperVisionContexts?: PaperVisionContext[];
   subjectHint?: Subject;
   gradeHint?: Grade;
 };

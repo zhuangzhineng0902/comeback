@@ -170,7 +170,53 @@ function parseJsonObject(content: string): unknown {
   }
 }
 
+function formatBox(box: [number, number, number, number] | undefined) {
+  return box ? `[${box.join(",")}]` : "未提供坐标";
+}
+
+function formatPaperVisionContexts(input: AnalyzeInput) {
+  if (!input.paperVisionContexts?.length) {
+    return "";
+  }
+
+  const contexts = input.paperVisionContexts.map((context) => {
+    const textBlocks = context.textBlocks.slice(0, 20).map((block, index) => ({
+      index: index + 1,
+      text: block.text,
+      bbox: formatBox(block.bbox),
+      confidence: block.confidence,
+      role: block.role
+    }));
+    const questionCandidates = context.questionCandidates.slice(0, 12).map((question, index) => ({
+      index: index + 1,
+      questionId: question.questionId,
+      text: question.text,
+      bbox: formatBox(question.bbox),
+      confidence: question.confidence
+    }));
+
+    return {
+      sourceImageIndex: context.sourceImageIndex,
+      engine: context.engine,
+      status: context.status,
+      summary: context.summary,
+      rawText: context.rawText?.slice(0, 2000),
+      textBlocks,
+      questionCandidates
+    };
+  });
+
+  return [
+    "OCR 前置识别结果如下，这是给你定位题号、题干、学生答案区域和版面的证据层。",
+    "请优先用 OCR 文本校对题干、题号、选项和普通印刷文字；同时必须继续查看原图来识别手写答案、批改符号、涂改痕迹和公式细节。",
+    "如果 OCR 文本与图片视觉冲突，以原图为准，并在 gradingEvidence.evidenceSummary 中说明冲突。",
+    "坐标 bbox 格式为 [x1,y1,x2,y2]，可用于判断学生答案是否离题干较远。",
+    JSON.stringify(contexts)
+  ].join("\n");
+}
+
 function buildPrompt(input: AnalyzeInput) {
+  const paperVisionContext = formatPaperVisionContexts(input);
   return [
     "你是一个只服务初中学生学习的私人教师 Agent。",
     "请分析图片中的错题或习题照片，输出严格 JSON，不要输出 Markdown，不要输出解释性前后缀。",
@@ -202,11 +248,13 @@ function buildPrompt(input: AnalyzeInput) {
     "richExplanation.shenzhenExample 必须给一道深圳题型风格的同类题；如果没有可靠来源，label 必须是“深圳题型风格”。",
     "不要把未核验来源的题目说成深圳真题；只有能确认公开来源时才使用“深圳真题参考”并填写 sourceNote。",
     "richExplanation.illustration 只能是结构化数据，type 只能是 flow、compare、treePath，nodes 最多 8 个；不要输出 HTML、Markdown 或远程图片链接。",
+    paperVisionContext,
     `用户提示学科：${input.subjectHint ?? "未提供，请根据图片自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请根据图片自动识别"}；文件名：${input.filename}。`
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 function buildRepairPrompt(content: string, input: AnalyzeInput) {
+  const paperVisionContext = formatPaperVisionContexts(input);
   return [
     "请把下面这段错题分析内容转换成严格 JSON。",
     "只输出 JSON 对象，不要 Markdown，不要 <think>，不要解释。",
@@ -234,10 +282,11 @@ function buildRepairPrompt(content: string, input: AnalyzeInput) {
     "richExplanation.shenzhenExample 必须给一道深圳题型风格的同类题；如果没有可靠来源，label 必须是“深圳题型风格”。",
     "不要把未核验来源的题目说成深圳真题；只有能确认公开来源时才使用“深圳真题参考”并填写 sourceNote。",
     "richExplanation.illustration 只能是结构化数据，type 只能是 flow、compare、treePath，nodes 最多 8 个；不要输出 HTML、Markdown 或远程图片链接。",
+    paperVisionContext,
     `用户提示学科：${input.subjectHint ?? "未提供，请根据图片自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请根据图片自动识别"}；文件名：${input.filename}。`,
     "原始内容：",
     content
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 function splitMiniMaxList(value: string, primarySeparators?: RegExp) {

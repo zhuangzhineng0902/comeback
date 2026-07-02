@@ -24,6 +24,7 @@ const analysis = {
 
 const analyzeMistakeMock = vi.fn();
 const saveAnalysisAsMistakeMock = vi.fn();
+const analyzeImageWithOcrMock = vi.fn();
 const execFileMock = vi.hoisted(() => vi.fn());
 const prismaMock = {
   mistake: {
@@ -53,6 +54,10 @@ vi.mock("@/lib/repositories/mistakes", () => ({
   saveAnalysisAsMistake: saveAnalysisAsMistakeMock
 }));
 
+vi.mock("@/lib/ocr/client", () => ({
+  analyzeImageWithOcr: analyzeImageWithOcrMock
+}));
+
 vi.mock("@/lib/db", () => ({
   prisma: prismaMock
 }));
@@ -66,6 +71,7 @@ describe("api routes", () => {
   beforeEach(() => {
     analyzeMistakeMock.mockReset();
     saveAnalysisAsMistakeMock.mockReset();
+    analyzeImageWithOcrMock.mockReset();
     execFileMock.mockReset();
     prismaMock.mistake.findFirst.mockReset();
     prismaMock.mistake.findMany.mockReset();
@@ -121,6 +127,54 @@ describe("api routes", () => {
         analysis
       })
     );
+  });
+
+  it("runs OCR before AI analysis and returns paper vision context", async () => {
+    const paperVisionContext = {
+      sourceImageIndex: 0,
+      engine: "ocr",
+      status: "available",
+      summary: "识别 2 个文字块",
+      rawText: "1. There ____ a book on the desk. 学生答案 B",
+      textBlocks: [
+        { text: "1. There ____ a book on the desk.", bbox: [10, 20, 300, 60], confidence: 0.96 },
+        { text: "学生答案 B", bbox: [320, 80, 420, 120], confidence: 0.88 }
+      ],
+      questionCandidates: [
+        { questionId: "1", text: "There ____ a book on the desk.", bbox: [10, 20, 420, 140], confidence: 0.9 }
+      ]
+    };
+    analyzeImageWithOcrMock.mockResolvedValue(paperVisionContext);
+    analyzeMistakeMock.mockResolvedValue({ mode: "api", analysis });
+    saveAnalysisAsMistakeMock.mockResolvedValue({
+      mistake: { id: "mistake-1" },
+      gap: { severity: "normal" }
+    });
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    const file = new File(["image-bytes"], "paper.png", { type: "image/png" });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new TextEncoder().encode("image-bytes").buffer
+    });
+    formData.set("file", file);
+
+    const response = await POST({ formData: async () => formData } as Request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(analyzeImageWithOcrMock).toHaveBeenCalledWith({
+      filename: "paper.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64"),
+      sourceImageIndex: 0
+    });
+    expect(analyzeMistakeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paperVisionContexts: [paperVisionContext]
+      })
+    );
+    expect(body.paperVisionContexts).toEqual([paperVisionContext]);
+    expect(body.imageGroups[0].paperVisionContext).toEqual(paperVisionContext);
   });
 
   it("analyzes up to sixteen uploaded images without subject or grade hints", async () => {
