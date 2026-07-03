@@ -971,6 +971,50 @@ describe("simulated analyzer", () => {
     expect(compactRepairBody.messages[0].content).toContain("不要扩写讲解");
   });
 
+  it("falls back to OCR-only MiniMax analysis when the vision request times out", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const timeoutError = new Error("The operation was aborted due to timeout");
+    timeoutError.name = "TimeoutError";
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(timeoutError)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(minimaxAnalysis) } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64"),
+      paperVisionContexts: [
+        {
+          sourceImageIndex: 0,
+          engine: "ocr",
+          status: "available",
+          summary: "识别 6 个文字块",
+          rawText: "1. Which numbers are irrational?",
+          textBlocks: [{ text: "1. Which numbers are irrational?", bbox: [10, 20, 500, 60], confidence: 0.96 }],
+          questionCandidates: [{ questionId: "1", text: "Which numbers are irrational?", bbox: [10, 20, 500, 60] }]
+        }
+      ]
+    });
+
+    expect(result.mode).toBe("api");
+    expect(result.analysis.questionType).toBe("一次函数应用题");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const retryBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)) as {
+      messages: Array<{ content: string }>;
+    };
+    expect(retryBody.messages[0].content).toContain("OCR-only");
+    expect(retryBody.messages[0].content).toContain("不要再请求或等待图片视觉识别");
+  });
+
   it("repairs rich explanations with malformed illustration types instead of dropping them", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     const fetchMock = vi

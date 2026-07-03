@@ -311,6 +311,20 @@ function buildCompactRepairPrompt(content: string, input: AnalyzeInput) {
   ].filter(Boolean).join("\n");
 }
 
+function buildOcrOnlyPrompt(input: AnalyzeInput) {
+  const paperVisionContext = formatPaperVisionContexts(input);
+  return [
+    "OCR-only 真实 AI 分析模式。",
+    "上一次图片视觉分析请求超时。请不要再请求或等待图片视觉识别，只根据 OCR 证据层、题号候选、文字块坐标和用户提示生成严格 JSON。",
+    "如果 OCR 证据不足以确定某一道题是否错了，可以输出 suspected，并设置 gradingEvidence.needsConfirmation 为 true。",
+    "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
+    "每个元素必须包含 sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
+    "practiceQuestions 只给 1 道；richExplanation.walkthrough 只给 2 到 3 步；illustration.nodes 最多 4 个；保持内容紧凑。",
+    paperVisionContext,
+    `用户提示学科：${input.subjectHint ?? "未提供，请根据 OCR 自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请根据 OCR 自动识别"}；文件名：${input.filename}。`
+  ].filter(Boolean).join("\n");
+}
+
 function splitMiniMaxList(value: string, primarySeparators?: RegExp) {
   const separators = primarySeparators ?? /→|->|=>|、|，|,|;|；|\r?\n/g;
   const parts = value
@@ -738,6 +752,34 @@ async function repairMiniMaxContentCompact(input: {
   });
 }
 
+async function analyzeMiniMaxOcrOnly(input: {
+  baseUrl: string;
+  apiKey: string;
+  analyzeInput: AnalyzeInput;
+}) {
+  return postMiniMax({
+    baseUrl: input.baseUrl,
+    apiKey: input.apiKey,
+    body: {
+      model: process.env.MINIMAX_MODEL ?? defaultModel,
+      messages: [
+        {
+          role: "user",
+          content: buildOcrOnlyPrompt(input.analyzeInput)
+        }
+      ],
+      thinking: { type: "disabled" },
+      response_format: { type: "json_object" },
+      temperature: 0.1,
+      max_completion_tokens: getMaxCompletionTokens()
+    }
+  });
+}
+
+function isMiniMaxTimeout(error: unknown) {
+  return error instanceof Error && error.message.includes("MiniMax request timed out");
+}
+
 export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisOutput[]> {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey || !input.imageBase64 || !input.mimeType) {
@@ -752,26 +794,35 @@ export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisO
     type: "image_url",
     image_url: { url: `data:${image.mimeType};base64,${image.imageBase64}` }
   }));
-  const content = await postMiniMax({
-    baseUrl,
-    apiKey,
-    body: {
-      model: process.env.MINIMAX_MODEL ?? defaultModel,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: buildPrompt(input) },
-            ...imageContent
-          ]
-        }
-      ],
-      thinking: { type: "disabled" },
-      response_format: { type: "json_object" },
-      temperature: 0.2,
-      max_completion_tokens: getMaxCompletionTokens()
+  let content: string;
+  try {
+    content = await postMiniMax({
+      baseUrl,
+      apiKey,
+      body: {
+        model: process.env.MINIMAX_MODEL ?? defaultModel,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: buildPrompt(input) },
+              ...imageContent
+            ]
+          }
+        ],
+        thinking: { type: "disabled" },
+        response_format: { type: "json_object" },
+        temperature: 0.2,
+        max_completion_tokens: getMaxCompletionTokens()
+      }
+    });
+  } catch (error) {
+    if (!isMiniMaxTimeout(error) || !input.paperVisionContexts?.some((context) => context.status === "available")) {
+      throw error;
     }
-  });
+
+    content = await analyzeMiniMaxOcrOnly({ baseUrl, apiKey, analyzeInput: input });
+  }
 
   try {
     return parseAnalysis(content);
