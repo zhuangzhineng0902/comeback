@@ -238,7 +238,7 @@ describe("simulated analyzer", () => {
     });
 
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
-    expect(body.max_completion_tokens).toBeGreaterThanOrEqual(8000);
+    expect(body.max_completion_tokens).toBeGreaterThanOrEqual(12000);
   });
 
   it("includes MiniMax error response details when the request is rejected", async () => {
@@ -737,7 +737,7 @@ describe("simulated analyzer", () => {
           engine: "ocr",
           status: "available",
           summary: "识别 2 个文字块",
-          rawText: "1. There ____ a book on the desk. 学生答案 B",
+          rawText: "RAW_SHOULD_BE_OMITTED 1. There ____ a book on the desk. 学生答案 B",
           textBlocks: [
             { text: "There ____ a book on the desk.", bbox: [10, 20, 300, 60], confidence: 0.96 },
             { text: "学生答案 B", bbox: [320, 80, 420, 120], confidence: 0.88 }
@@ -757,6 +757,7 @@ describe("simulated analyzer", () => {
     expect(prompt).toContain("There ____ a book on the desk.");
     expect(prompt).toContain("[10,20,300,60]");
     expect(prompt).toContain("优先用 OCR 文本校对题干");
+    expect(prompt).not.toContain("RAW_SHOULD_BE_OMITTED");
   });
 
   it("allows overriding the MiniMax base URL for compatible deployments", async () => {
@@ -918,10 +919,56 @@ describe("simulated analyzer", () => {
     };
     expect(repairBody.thinking).toEqual({ type: "disabled" });
     expect(repairBody.response_format).toEqual({ type: "json_object" });
-    expect(repairBody.max_completion_tokens).toBeGreaterThanOrEqual(8000);
+    expect(repairBody.max_completion_tokens).toBeGreaterThanOrEqual(12000);
     expect(repairBody.messages[0].content).toContain("转换成严格 JSON");
     expect(repairBody.messages[0].content).toContain("所有 JSON 属性名必须使用英文双引号");
     expect(repairBody.messages[0].content).toContain("重新生成完整 JSON 对象");
+  });
+
+  it("uses a compact third MiniMax request when the repaired JSON is still malformed", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "<think>analysis without json</think>" } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "{\"analyses\":[{\"questionType\" \"missing colon\"}]" } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(minimaxAnalysis) } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.mode).toBe("api");
+    expect(result.analysis.questionType).toBe("一次函数应用题");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const compactRepairBody = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)) as {
+      messages: Array<{ content: string }>;
+    };
+    expect(compactRepairBody.messages[0].content).toContain("紧凑 JSON");
+    expect(compactRepairBody.messages[0].content).toContain("不要扩写讲解");
   });
 
   it("repairs rich explanations with malformed illustration types instead of dropping them", async () => {

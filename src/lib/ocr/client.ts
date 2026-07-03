@@ -120,6 +120,11 @@ function extractQuestionCandidates(payload: Record<string, unknown>) {
   return [];
 }
 
+function getOcrTimeoutMs() {
+  const configured = Number.parseInt(process.env.OCR_TIMEOUT_MS ?? "", 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : 45_000;
+}
+
 function normalizeOcrPayload(payload: unknown, input: OcrInput): PaperVisionContext {
   const record = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : {};
   const blocks = extractBlocks(record);
@@ -151,7 +156,7 @@ export async function analyzeImageWithOcr(input: OcrInput): Promise<PaperVisionC
     const response = await fetch(serviceUrl, {
       method: "POST",
       body: formData,
-      signal: AbortSignal.timeout(20_000)
+      signal: AbortSignal.timeout(getOcrTimeoutMs())
     });
 
     if (!response.ok) {

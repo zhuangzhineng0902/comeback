@@ -69,6 +69,7 @@ vi.mock("node:child_process", () => ({
 
 describe("api routes", () => {
   beforeEach(() => {
+    delete process.env.ENABLE_AI_FALLBACK;
     analyzeMistakeMock.mockReset();
     saveAnalysisAsMistakeMock.mockReset();
     analyzeImageWithOcrMock.mockReset();
@@ -83,6 +84,7 @@ describe("api routes", () => {
   });
 
   afterEach(async () => {
+    delete process.env.ENABLE_AI_FALLBACK;
     await rm(path.join(process.cwd(), "uploads"), { recursive: true, force: true });
     await mkdir(path.join(process.cwd(), "uploads"), { recursive: true });
   });
@@ -370,7 +372,27 @@ describe("api routes", () => {
     expect(files).toEqual([]);
   });
 
-  it("falls back to simulation when real AI analysis fails after upload", async () => {
+  it("returns an explicit error instead of mock fallback when real AI analysis fails", async () => {
+    analyzeMistakeMock.mockRejectedValue(new Error("MiniMax response could not be parsed: malformed JSON"));
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    const file = new File(["image-bytes"], "paper.png", { type: "image/png" });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new TextEncoder().encode("image-bytes").buffer
+    });
+    formData.set("file", file);
+
+    const response = await POST({ formData: async () => formData } as Request);
+    const files = await readdir(path.join(process.cwd(), "uploads"));
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: "真实 AI 分析失败，请稍后重试。" });
+    expect(files).toEqual([]);
+    expect(saveAnalysisAsMistakeMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to simulation only when ENABLE_AI_FALLBACK is true", async () => {
+    process.env.ENABLE_AI_FALLBACK = "true";
     analyzeMistakeMock.mockRejectedValue(new Error("MiniMax response could not be parsed: malformed JSON"));
     saveAnalysisAsMistakeMock.mockResolvedValue({
       mistake: { id: "mistake-1" },

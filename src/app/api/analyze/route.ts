@@ -39,6 +39,10 @@ function isMiniMaxFailure(error: unknown) {
   return error instanceof Error && error.message.includes("MiniMax");
 }
 
+function shouldFallbackToSimulation() {
+  return process.env.ENABLE_AI_FALLBACK === "true";
+}
+
 function isPaperVisionContext(context: PaperVisionContext | null | undefined): context is PaperVisionContext {
   return context !== null && context !== undefined;
 }
@@ -136,6 +140,10 @@ export async function POST(request: Request) {
     };
     const result = await analyzeMistake(analyzeInput).catch(async (error) => {
       if (!isMiniMaxFailure(error)) {
+        throw error;
+      }
+
+      if (!shouldFallbackToSimulation()) {
         throw error;
       }
 

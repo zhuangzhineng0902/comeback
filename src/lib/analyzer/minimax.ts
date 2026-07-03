@@ -5,7 +5,7 @@ import { grades, subjects, type AnalysisOutput } from "@/lib/types";
 
 const defaultMiniMaxBaseUrl = "https://api.minimaxi.com/v1";
 const defaultModel = "MiniMax-M3";
-const defaultMaxCompletionTokens = 8000;
+const defaultMaxCompletionTokens = 16000;
 const gradingMarkTypes = ["check", "cross", "partial", "deduction", "circle", "question", "none", "unknown"] as const;
 const mistakeJudgements = ["wrong", "partial", "suspected", "correct", "unknown"] as const;
 
@@ -105,6 +105,11 @@ function getMaxCompletionTokens() {
   return Number.isFinite(configured) && configured > 0 ? configured : defaultMaxCompletionTokens;
 }
 
+function getMiniMaxTimeoutMs() {
+  const configured = Number.parseInt(process.env.MINIMAX_TIMEOUT_MS ?? "", 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : 90_000;
+}
+
 function stripJsonFence(content: string) {
   const trimmed = content.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
@@ -180,14 +185,14 @@ function formatPaperVisionContexts(input: AnalyzeInput) {
   }
 
   const contexts = input.paperVisionContexts.map((context) => {
-    const textBlocks = context.textBlocks.slice(0, 20).map((block, index) => ({
+    const textBlocks = context.textBlocks.slice(0, 12).map((block, index) => ({
       index: index + 1,
       text: block.text,
       bbox: formatBox(block.bbox),
       confidence: block.confidence,
       role: block.role
     }));
-    const questionCandidates = context.questionCandidates.slice(0, 12).map((question, index) => ({
+    const questionCandidates = context.questionCandidates.slice(0, 16).map((question, index) => ({
       index: index + 1,
       questionId: question.questionId,
       text: question.text,
@@ -200,14 +205,13 @@ function formatPaperVisionContexts(input: AnalyzeInput) {
       engine: context.engine,
       status: context.status,
       summary: context.summary,
-      rawText: context.rawText?.slice(0, 2000),
       textBlocks,
       questionCandidates
     };
   });
 
   return [
-    "OCR 前置识别结果如下，这是给你定位题号、题干、学生答案区域和版面的证据层。",
+    "OCR 前置识别结果如下，这是给你定位题号、题干、学生答案区域和版面的紧凑证据层。",
     "请优先用 OCR 文本校对题干、题号、选项和普通印刷文字；同时必须继续查看原图来识别手写答案、批改符号、涂改痕迹和公式细节。",
     "如果 OCR 文本与图片视觉冲突，以原图为准，并在 gradingEvidence.evidenceSummary 中说明冲突。",
     "坐标 bbox 格式为 [x1,y1,x2,y2]，可用于判断学生答案是否离题干较远。",
@@ -286,6 +290,24 @@ function buildRepairPrompt(content: string, input: AnalyzeInput) {
     `用户提示学科：${input.subjectHint ?? "未提供，请根据图片自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请根据图片自动识别"}；文件名：${input.filename}。`,
     "原始内容：",
     content
+  ].filter(Boolean).join("\n");
+}
+
+function buildCompactRepairPrompt(content: string, input: AnalyzeInput) {
+  const paperVisionContext = formatPaperVisionContexts(input);
+  return [
+    "请重新生成严格、紧凑 JSON，只输出 JSON 对象。",
+    "不要 Markdown，不要 <think>，不要解释，不要扩写讲解。",
+    "顶层必须是 {\"analyses\":[...]}，每道错题一个元素。",
+    "如果原内容格式损坏，请保留能确定的信息，缺失项用简短但有效的学习分析补齐。",
+    "每个元素必须包含 sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
+    "subject 只能是语文、数学、英语、物理、化学、生物、历史、地理、道德与法治；grade 只能是七年级、八年级、九年级。",
+    "knowledgePoints 至少 1 个；practiceQuestions 只给 1 道；richExplanation.walkthrough 只给 2 步；illustration.nodes 最多 3 个。",
+    "字符串里如果出现英文双引号，必须转义为 \\\"。",
+    paperVisionContext,
+    `用户提示学科：${input.subjectHint ?? "未提供，请根据图片自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请根据图片自动识别"}；文件名：${input.filename}。`,
+    "原始损坏内容：",
+    content.slice(0, 4000)
   ].filter(Boolean).join("\n");
 }
 
@@ -623,14 +645,23 @@ function parseAnalysis(content: string): AnalysisOutput[] {
 }
 
 async function postMiniMax(input: { baseUrl: string; apiKey: string; body: unknown }) {
-  const response = await fetch(`${input.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${input.apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(input.body)
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${input.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${input.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(input.body),
+      signal: AbortSignal.timeout(getMiniMaxTimeoutMs())
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error(`MiniMax request timed out after ${getMiniMaxTimeoutMs()}ms.`);
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -682,6 +713,31 @@ async function repairMiniMaxContent(input: {
   });
 }
 
+async function repairMiniMaxContentCompact(input: {
+  baseUrl: string;
+  apiKey: string;
+  analyzeInput: AnalyzeInput;
+  content: string;
+}) {
+  return postMiniMax({
+    baseUrl: input.baseUrl,
+    apiKey: input.apiKey,
+    body: {
+      model: process.env.MINIMAX_MODEL ?? defaultModel,
+      messages: [
+        {
+          role: "user",
+          content: buildCompactRepairPrompt(input.content, input.analyzeInput)
+        }
+      ],
+      thinking: { type: "disabled" },
+      response_format: { type: "json_object" },
+      temperature: 0,
+      max_completion_tokens: getMaxCompletionTokens()
+    }
+  });
+}
+
 export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisOutput[]> {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey || !input.imageBase64 || !input.mimeType) {
@@ -721,6 +777,11 @@ export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisO
     return parseAnalysis(content);
   } catch {
     const repairedContent = await repairMiniMaxContent({ baseUrl, apiKey, analyzeInput: input, content });
-    return parseAnalysis(repairedContent);
+    try {
+      return parseAnalysis(repairedContent);
+    } catch {
+      const compactContent = await repairMiniMaxContentCompact({ baseUrl, apiKey, analyzeInput: input, content: repairedContent });
+      return parseAnalysis(compactContent);
+    }
   }
 }

@@ -40,9 +40,19 @@ Then set the Next.js app environment:
 
 ```bash
 OCR_SERVICE_URL="http://127.0.0.1:5005/ocr"
+OCR_TIMEOUT_MS="45000"
+MINIMAX_MAX_COMPLETION_TOKENS="16000"
+MINIMAX_TIMEOUT_MS="90000"
+ENABLE_AI_FALLBACK="false"
 ```
 
 For Apple Silicon or CPU/GPU-specific installs, use the PaddlePaddle wheel that matches your Python and hardware environment.
+
+Large uploaded photos are resized before OCR. Override the default longest side if needed:
+
+```bash
+OCR_MAX_SIDE="1800"
+```
 
 ## Test
 
