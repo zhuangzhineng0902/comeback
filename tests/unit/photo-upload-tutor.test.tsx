@@ -246,6 +246,7 @@ describe("PhotoUploadTutor", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "查看历史 一元一次方程" })).toBeTruthy();
     });
+    expect(screen.getByText(/2026\/7\/1 16:00/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "查看历史 一元一次方程" }));
 
     expect(screen.getAllByText("一元一次方程").length).toBeGreaterThanOrEqual(1);

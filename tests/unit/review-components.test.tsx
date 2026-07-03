@@ -147,7 +147,7 @@ describe("review components", () => {
             questionType: "一次函数图像判断题",
             mistakeReason: "只看截距，没有看斜率。",
             masteryStatus: "new",
-            createdAt: new Date("2026-06-26T00:00:00Z")
+            createdAt: new Date("2026-06-26T08:05:00+08:00")
           }
         ]}
       />
@@ -157,7 +157,7 @@ describe("review components", () => {
     expect(
       screen
         .getByRole("link", {
-          name: "八年级 数学 2026/6/26 新错题 一次函数图像判断题 只看截距，没有看斜率。"
+          name: "八年级 数学 2026/6/26 08:05 新错题 一次函数图像判断题 只看截距，没有看斜率。"
         })
         .getAttribute("href")
     ).toBe("/mistakes/mistake-1");

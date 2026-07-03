@@ -4,6 +4,7 @@ import { LoaderCircle, Send, Upload, X } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 
 import { AnalysisCard } from "@/components/AnalysisCard";
+import { formatDateTimeToMinute } from "@/lib/date-format";
 import {
   grades,
   subjects,
@@ -415,7 +416,7 @@ export function PhotoUploadTutor() {
                 >
                   <span className="block text-xs text-slate-500">
                     {entry.analysis.grade} · {entry.analysis.subject}
-                    {entry.createdAt ? ` · ${new Date(entry.createdAt).toLocaleDateString("zh-CN")}` : ""}
+                    {entry.createdAt ? ` · ${formatDateTimeToMinute(entry.createdAt)}` : ""}
                   </span>
                   <span className="mt-1 block truncate text-sm font-medium text-ink">
                     {entry.analysis.questionType}

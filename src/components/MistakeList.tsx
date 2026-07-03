@@ -1,5 +1,6 @@
 import Link from "next/link";
 import React from "react";
+import { formatDateTimeToMinute } from "@/lib/date-format";
 
 type MistakeSummary = {
   id: string;
@@ -37,7 +38,7 @@ export function MistakeList({ mistakes }: { mistakes: MistakeSummary[] }) {
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
             <span>{mistake.grade}</span>
             <span>{mistake.subject}</span>
-            <span>{new Date(mistake.createdAt).toLocaleDateString("zh-CN")}</span>
+            <span>{formatDateTimeToMinute(mistake.createdAt)}</span>
             <span>{masteryLabels[mistake.masteryStatus] ?? masteryLabels.new}</span>
           </div>
           <h2 className="mt-2 font-semibold text-ink">{mistake.questionType}</h2>
