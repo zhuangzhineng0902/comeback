@@ -49,6 +49,35 @@ class NormalizePaddleResultTest(unittest.TestCase):
         self.assertIn("deduction", candidate["markTypes"])
         self.assertEqual(candidate["judgement"], "partial")
 
+    def test_ignores_ocr_text_cross_without_red_ink_evidence(self):
+        result = [
+            [
+                [[[80, 100], [620, 100], [620, 140], [80, 140]], ("8. 下列说法正确的是", 0.96)],
+                [[[120, 180], [140, 180], [140, 210], [120, 210]], ("X", 0.94)],
+                [[[160, 180], [500, 180], [500, 210], [160, 210]], ("A. 错误选项", 0.91)],
+            ]
+        ]
+
+        payload = normalize_paddle_result(result)
+
+        self.assertEqual(payload["mistakeCandidates"], [])
+
+    def test_does_not_bind_right_column_red_marks_to_left_column_questions(self):
+        result = [
+            [
+                [[[80, 1020], [620, 1020], [620, 1060], [80, 1060]], ("8. 函数图象选择题", 0.96)],
+                [[[980, 640], [1380, 640], [1380, 680], [980, 680]], ("14. 计算：（1）-（7）", 0.94)],
+            ]
+        ]
+        grading_marks = [
+            {"markType": "cross", "bbox": [930, 970, 970, 1010], "confidence": 0.8, "source": "red-ink"},
+        ]
+
+        payload = normalize_paddle_result(result, grading_marks=grading_marks)
+
+        self.assertEqual(len(payload["mistakeCandidates"]), 1)
+        self.assertEqual(payload["mistakeCandidates"][0]["questionId"], "14")
+
 
 if __name__ == "__main__":
     unittest.main()

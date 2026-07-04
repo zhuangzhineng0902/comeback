@@ -217,6 +217,8 @@ describe("simulated analyzer", () => {
     expect(JSON.stringify(fetchMock.mock.calls[0][1]?.body)).toContain("半勾");
     expect(JSON.stringify(fetchMock.mock.calls[0][1]?.body)).toContain("独立完整解题");
     expect(JSON.stringify(fetchMock.mock.calls[0][1]?.body)).toContain("学生答案区域");
+    expect(JSON.stringify(fetchMock.mock.calls[0][1]?.body)).toContain("黑色或铅笔");
+    expect(JSON.stringify(fetchMock.mock.calls[0][1]?.body)).toContain("排除选项");
   });
 
   it("allows long MiniMax outputs for full-paper analysis", async () => {

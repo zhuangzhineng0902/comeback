@@ -110,6 +110,9 @@ def _candidate_from_block(block: dict[str, Any], index: int) -> dict[str, Any] |
         return None
 
     text = QUESTION_PREFIX_RE.sub("", block["text"], count=1).strip()
+    if match.group(1) in {"一", "二", "三", "四"} and re.search(r"选择题|填空题|解答题|本题|共\d+小题", text):
+        return None
+
     return {
         "questionId": match.group(1),
         "text": text or block["text"],
@@ -143,6 +146,17 @@ def _distance(a: tuple[float, float], b: tuple[float, float]) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
+def _is_mark_in_question_column(mark_box: list[float] | None, question_box: list[float] | None) -> bool:
+    if not mark_box or not question_box:
+        return False
+
+    mark_x = (mark_box[0] + mark_box[2]) / 2
+    question_width = max(1, question_box[2] - question_box[0])
+    left_tolerance = max(120, question_width * 0.25)
+    right_tolerance = max(180, question_width * 0.35)
+    return question_box[0] - left_tolerance <= mark_x <= question_box[2] + right_tolerance
+
+
 def _find_nearest_question(mark: dict[str, Any], questions: list[dict[str, Any]]) -> dict[str, Any] | None:
     mark_center = _center(mark.get("bbox"))
     if not mark_center:
@@ -157,6 +171,8 @@ def _find_nearest_question(mark: dict[str, Any], questions: list[dict[str, Any]]
         question_box = question.get("bbox")
         question_center = _center(question_box)
         if not question_center:
+            continue
+        if not _is_mark_in_question_column(mark.get("bbox"), question_box):
             continue
         if prefer_right_column and question_center[0] < median_x:
             continue
@@ -188,6 +204,8 @@ def _find_sub_question(mark: dict[str, Any], blocks: list[dict[str, Any]], quest
         block_center = _center(block.get("bbox"))
         if not match or not block_center:
             continue
+        if question and not _is_mark_in_question_column(block.get("bbox"), question.get("bbox")):
+            continue
         if block_center[1] < question_y - 20:
             continue
         if block_center[1] > mark_center[1] + 70:
@@ -211,6 +229,20 @@ def _judgement_from_marks(mark_types: list[str]) -> str:
     return "unknown"
 
 
+def _is_candidate_grading_mark(mark: dict[str, Any]) -> bool:
+    source = mark.get("source")
+    mark_type = mark.get("markType")
+    if source == "red-ink":
+        if mark_type == "cross" and (mark.get("confidence") or 0) < 0.5:
+            return False
+        return True
+
+    # OCR text has no color channel. A standalone X/check can be a student's
+    # black-pen option elimination mark, so only keep textual marks that imply
+    # teacher grading semantics on their own.
+    return source == "ocr-text" and mark_type in {"deduction", "partial"}
+
+
 def build_mistake_candidates(
     blocks: list[dict[str, Any]],
     question_candidates: list[dict[str, Any]],
@@ -219,6 +251,8 @@ def build_mistake_candidates(
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
 
     for mark in grading_marks:
+        if not _is_candidate_grading_mark(mark):
+            continue
         question = _find_nearest_question(mark, question_candidates)
         if not question:
             continue
@@ -231,6 +265,7 @@ def build_mistake_candidates(
                 "subQuestionId": sub_id,
                 "text": question.get("text"),
                 "bbox": question.get("bbox"),
+                "questionBbox": question.get("bbox"),
                 "confidence": 0,
                 "markTypes": [],
                 "marks": [],
@@ -245,7 +280,18 @@ def build_mistake_candidates(
 
     candidates = []
     for candidate in grouped.values():
-        mark_types = candidate.pop("marks") and candidate["markTypes"]
+        marks = candidate.pop("marks")
+        question_box = candidate.pop("questionBbox", None)
+        mark_types = marks and candidate["markTypes"]
+        if set(mark_types) == {"unknown"}:
+            has_unknown_inside_question = any(
+                question_box
+                and (mark_box := mark.get("bbox"))
+                and question_box[0] <= ((mark_box[0] + mark_box[2]) / 2) <= question_box[2]
+                for mark in marks
+            )
+            if not has_unknown_inside_question:
+                continue
         candidate["judgement"] = _judgement_from_marks(mark_types)
         candidate["evidenceSummary"] = f"题号 {candidate.get('questionId')}{'(' + candidate.get('subQuestionId') + ')' if candidate.get('subQuestionId') else ''} 附近发现批改标记：{', '.join(mark_types)}。"
         candidates.append(candidate)
