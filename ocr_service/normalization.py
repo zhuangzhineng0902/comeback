@@ -7,6 +7,7 @@ QUESTION_PREFIX_RE = re.compile(r"^\s*(?:第\s*)?([0-9]{1,3}|[一二三四五六
 TEACHER_MARK_RE = re.compile(r"^[×xX√✓✔△]|扣\s*\d+|-\s*\d+|半[对勾]")
 STUDENT_ANSWER_RE = re.compile(r"(学生答案|答案|解[:：]|答[:：]|所以|因为|故)")
 SUB_QUESTION_RE = re.compile(r"^\s*[\(（]([0-9]{1,2})[\)）]")
+CHOICE_OPTION_RE = re.compile(r"^\s*([A-D])\s*[\.．、]")
 
 
 def _as_number(value: Any) -> float | None:
@@ -134,6 +135,61 @@ def _union_box(boxes: list[list[float] | None]) -> list[float] | None:
     return [min(box[0] for box in valid), min(box[1] for box in valid), max(box[2] for box in valid), max(box[3] for box in valid)]
 
 
+def _infer_missing_choice_question_candidates(
+    blocks: list[dict[str, Any]],
+    question_candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    existing_ids = {str(candidate.get("questionId")) for candidate in question_candidates}
+    if "1" in existing_ids:
+        return []
+
+    section_blocks = [
+        block
+        for block in blocks
+        if "选择题" in block.get("text", "") and block.get("bbox")
+    ]
+    if not section_blocks:
+        return []
+
+    next_question = next(
+        (
+            candidate
+            for candidate in question_candidates
+            if str(candidate.get("questionId")) == "2" and candidate.get("bbox")
+        ),
+        None,
+    )
+    if not next_question:
+        return []
+
+    section_y = min((block["bbox"][1] for block in section_blocks), default=0)
+    next_y = next_question["bbox"][1]
+    option_blocks = [
+        block
+        for block in blocks
+        if block.get("bbox")
+        and section_y < block["bbox"][1] < next_y
+        and CHOICE_OPTION_RE.search(block.get("text", ""))
+    ]
+    option_labels = {CHOICE_OPTION_RE.search(block.get("text", "")).group(1) for block in option_blocks}
+    if len(option_labels) < 3:
+        return []
+
+    option_box = _union_box([block.get("bbox") for block in option_blocks])
+    if not option_box:
+        return []
+
+    return [
+        {
+            "questionId": "1",
+            "text": "OCR 未完整识别第 1 题题干，已根据 A-D 选项行反推为第 1 题选择题。",
+            "bbox": option_box,
+            "confidence": min(block.get("confidence") or 0.7 for block in option_blocks),
+            "inferred": True,
+        }
+    ]
+
+
 def _horizontal_overlap_ratio(a: list[float] | None, b: list[float] | None) -> float:
     if not a or not b:
         return 0
@@ -171,6 +227,8 @@ def _find_nearest_question(mark: dict[str, Any], questions: list[dict[str, Any]]
         question_box = question.get("bbox")
         question_center = _center(question_box)
         if not question_center:
+            continue
+        if question.get("inferred") and abs(mark_center[1] - question_center[1]) > 110:
             continue
         if not _is_mark_in_question_column(mark.get("bbox"), question_box):
             continue
@@ -266,6 +324,7 @@ def build_mistake_candidates(
                 "text": question.get("text"),
                 "bbox": question.get("bbox"),
                 "questionBbox": question.get("bbox"),
+                "inferred": question.get("inferred", False),
                 "confidence": 0,
                 "markTypes": [],
                 "marks": [],
@@ -282,12 +341,16 @@ def build_mistake_candidates(
     for candidate in grouped.values():
         marks = candidate.pop("marks")
         question_box = candidate.pop("questionBbox", None)
+        is_inferred = bool(candidate.get("inferred"))
         mark_types = marks and candidate["markTypes"]
         if set(mark_types) == {"unknown"}:
             has_unknown_inside_question = any(
                 question_box
                 and (mark_box := mark.get("bbox"))
-                and question_box[0] <= ((mark_box[0] + mark_box[2]) / 2) <= question_box[2]
+                and (
+                    question_box[0] <= ((mark_box[0] + mark_box[2]) / 2) <= question_box[2]
+                    or (is_inferred and _is_mark_in_question_column(mark_box, question_box))
+                )
                 for mark in marks
             )
             if not has_unknown_inside_question:
@@ -345,6 +408,7 @@ def normalize_paddle_result(result: Any, grading_marks: list[dict[str, Any]] | N
         for index, block in enumerate(blocks)
         if (candidate := _candidate_from_block(block, index)) is not None
     ]
+    question_candidates.extend(_infer_missing_choice_question_candidates(blocks, question_candidates))
     normalized_marks = [*(grading_marks or [])]
     normalized_marks.extend(mark for block in blocks if (mark := _mark_from_text_block(block)) is not None)
     mistake_candidates = build_mistake_candidates(blocks, question_candidates, normalized_marks)

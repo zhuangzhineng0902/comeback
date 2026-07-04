@@ -78,6 +78,48 @@ class NormalizePaddleResultTest(unittest.TestCase):
         self.assertEqual(len(payload["mistakeCandidates"]), 1)
         self.assertEqual(payload["mistakeCandidates"][0]["questionId"], "14")
 
+    def test_infers_missing_first_choice_question_from_options(self):
+        result = [
+            [
+                [[[90, 140], [520, 140], [520, 170], [90, 170]], ("一、选择题：本题共8小题", 0.96)],
+                [[[105, 230], [155, 230], [155, 255], [105, 255]], ("A.1", 0.99)],
+                [[[250, 230], [300, 230], [300, 255], [250, 255]], ("B.2", 0.99)],
+                [[[405, 230], [455, 230], [455, 255], [405, 255]], ("C.3", 0.99)],
+                [[[570, 230], [620, 230], [620, 255], [570, 255]], ("D.4", 0.99)],
+                [[[75, 265], [395, 265], [395, 295], [75, 295]], ("2. 下面各组数中，是勾股数的是（）", 0.97)],
+            ]
+        ]
+        grading_marks = [
+            {"markType": "unknown", "bbox": [716, 194, 722, 202], "confidence": 0.47, "source": "red-ink"},
+        ]
+
+        payload = normalize_paddle_result(result, grading_marks=grading_marks)
+
+        self.assertTrue(any(candidate["questionId"] == "1" for candidate in payload["questionCandidates"]))
+        q1_candidate = next(candidate for candidate in payload["mistakeCandidates"] if candidate["questionId"] == "1")
+        self.assertEqual(q1_candidate["judgement"], "suspected")
+
+    def test_inferred_choice_question_ignores_far_lower_red_marks(self):
+        result = [
+            [
+                [[[90, 140], [520, 140], [520, 170], [90, 170]], ("一、选择题：本题共8小题", 0.96)],
+                [[[105, 230], [155, 230], [155, 255], [105, 255]], ("A.1", 0.99)],
+                [[[250, 230], [300, 230], [300, 255], [250, 255]], ("B.2", 0.99)],
+                [[[405, 230], [455, 230], [455, 255], [405, 255]], ("C.3", 0.99)],
+                [[[570, 230], [620, 230], [620, 255], [570, 255]], ("D.4", 0.99)],
+                [[[75, 265], [395, 265], [395, 295], [75, 295]], ("2. 下面各组数中，是勾股数的是（）", 0.97)],
+            ]
+        ]
+        grading_marks = [
+            {"markType": "unknown", "bbox": [716, 194, 722, 202], "confidence": 0.47, "source": "red-ink"},
+            {"markType": "unknown", "bbox": [650, 1000, 670, 1020], "confidence": 0.47, "source": "red-ink"},
+        ]
+
+        payload = normalize_paddle_result(result, grading_marks=grading_marks)
+
+        q1_candidate = next(candidate for candidate in payload["mistakeCandidates"] if candidate["questionId"] == "1")
+        self.assertLess(q1_candidate["bbox"][3], 300)
+
 
 if __name__ == "__main__":
     unittest.main()
