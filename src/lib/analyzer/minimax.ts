@@ -763,9 +763,7 @@ async function postMiniMax(input: { baseUrl: string; apiKey: string; body: unkno
     throw new Error("MiniMax response did not include message content.");
   }
   if (choice?.finish_reason === "length") {
-    throw new Error(
-      `MiniMax response was truncated at ${getMaxCompletionTokens()} completion tokens. Increase MINIMAX_MAX_COMPLETION_TOKENS or reduce requested analysis detail.`
-    );
+    console.warn("MiniMax response was truncated; attempting to repair partial JSON content.");
   }
 
   return content;

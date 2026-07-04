@@ -108,6 +108,72 @@ function withSourceImageIndex(analysis: AnalysisOutput, sourceImageIndex: number
   };
 }
 
+function inferFallbackSubject(image: UploadedImage, contexts: PaperVisionContext[]): Subject {
+  const text = [image.filename, ...contexts.map((context) => context.rawText ?? "")].join("\n");
+  if (/[A-Za-z]{3,}|英语|English/i.test(text)) return "英语";
+  if (/数学|函数|方程|几何|代数/.test(text)) return "数学";
+  if (/语文|阅读|作文|古诗|文言/.test(text)) return "语文";
+  if (/物理|电路|速度|压强|力/.test(text)) return "物理";
+  if (/化学|溶液|元素|反应|方程式/.test(text)) return "化学";
+  return "英语";
+}
+
+function buildFailedBatchAnalysis(input: {
+  image: UploadedImage;
+  sourceImageIndex: number;
+  paperVisionContexts: PaperVisionContext[];
+  subjectHint?: Subject;
+  gradeHint?: Grade;
+  error: unknown;
+}): AnalysisOutput {
+  const firstContext = input.paperVisionContexts[0];
+  const firstCandidate = firstContext?.mistakeCandidates?.[0];
+  const subject = input.subjectHint ?? inferFallbackSubject(input.image, input.paperVisionContexts);
+  const grade = input.gradeHint ?? "七年级";
+  const errorSummary = input.error instanceof Error ? input.error.message : String(input.error);
+  const recognizedText =
+    firstCandidate?.text ??
+    firstContext?.rawText?.slice(0, 500) ??
+    "这一页 AI 深度解析失败，已保留图片和 OCR 信息，建议稍后单独重试这一页。";
+
+  return {
+    sourceImageIndex: input.sourceImageIndex,
+    subject,
+    grade,
+    questionType: "批量分析待复核页",
+    recognizedText,
+    studentAnswer: "AI 未能稳定解析这一页的学生答案。",
+    correctAnswer: "需要稍后单独重试或人工复核。",
+    knowledgePoints: [{ name: "待复核知识点", confidence: 0.3 }],
+    mistakeReason: `批量分析中这一页解析失败：${errorSummary.slice(0, 180)}`,
+    studentFriendlyExplanation: "这一页已经保存下来，但 AI 深度讲解没有稳定生成。可以先复习其它已解析错题，再单独上传这一页重试。",
+    example: "把这一页单独上传，或裁剪到错题区域后重新分析。",
+    archetype: {
+      title: "批量分析失败页复核",
+      pattern: "整页试卷批量识别时，单页模型输出异常",
+      solutionTemplate: "先确认图片清晰度，再单页重试；若有 OCR 候选，优先核对候选题号。",
+      commonTraps: ["一次上传页数较多导致模型输出截断", "图片内容过密导致 JSON 输出不完整"]
+    },
+    practiceQuestions: [
+      {
+        question: "请把这一页中最不确定的一道错题单独拍清楚后再提交。",
+        answer: "以重新分析后的答案为准。",
+        hint: "单页或裁剪错题区域能显著提高稳定性。"
+      }
+    ],
+    gradingEvidence: {
+      markType: firstCandidate?.markTypes?.[0] ?? "unknown",
+      teacherMarkConfidence: firstCandidate?.confidence ?? 0,
+      answerMatchConfidence: 0,
+      judgement: "suspected",
+      isPartialCredit: false,
+      needsConfirmation: true,
+      evidenceSummary: firstCandidate?.evidenceSummary ?? "批量分析中这一页 AI 输出异常，已保存为待复核记录。",
+      studentAnswerLocation: firstCandidate?.bbox ? `OCR候选区域 [${firstCandidate.bbox.join(",")}]` : undefined
+    }
+  };
+}
+
 async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper: (item: T, index: number) => Promise<R>) {
   const results = new Array<R>(items.length);
   let nextIndex = 0;
@@ -233,7 +299,8 @@ export async function POST(request: Request) {
       : await mapWithConcurrency(
           uploadedImages,
           getAnalyzeImageConcurrency(),
-          (image, index) => {
+          async (image, index) => {
+            const imagePaperVisionContexts = paperVisionContexts.filter((context) => context.sourceImageIndex === index);
             const singleImageInput = {
               filename: image.filename,
               mimeType: image.analysisMimeType,
@@ -245,12 +312,25 @@ export async function POST(request: Request) {
                   imageBase64: image.analysisImageBase64
                 }
               ],
-              paperVisionContexts: paperVisionContexts.filter((context) => context.sourceImageIndex === index),
+              paperVisionContexts: imagePaperVisionContexts,
               subjectHint: subject,
               gradeHint: grade,
               analysisDetail: "compact" as const
             };
-            return analyzeWithFallback(singleImageInput);
+            try {
+              return await analyzeWithFallback(singleImageInput);
+            } catch (error) {
+              console.error(`Batch image analysis failed for ${image.filename}; keeping batch response alive.`, error);
+              const analysis = buildFailedBatchAnalysis({
+                image,
+                sourceImageIndex: index,
+                paperVisionContexts: imagePaperVisionContexts,
+                subjectHint: subject,
+                gradeHint: grade,
+                error
+              });
+              return { mode: "partial_failure" as const, analysis, analyses: [analysis] };
+            }
           }
         );
     const analyses = results.flatMap((result, resultIndex) =>

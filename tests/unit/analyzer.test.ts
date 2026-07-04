@@ -405,6 +405,44 @@ describe("simulated analyzer", () => {
     });
   });
 
+  it("repairs MiniMax content even when the first response is marked truncated", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: "length",
+                message: { content: "{\"analyses\":[{\"subject\":\"数学\"" }
+              }
+            ]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify({ analyses: [minimaxAnalysis] }) } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.mode).toBe("api");
+    expect(result.analysis.questionType).toBe("一次函数应用题");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("repairs JSON-like MiniMax content with trailing commas and unquoted keys", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     const jsonLikeContent = `{

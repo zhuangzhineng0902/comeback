@@ -276,6 +276,44 @@ describe("api routes", () => {
     );
   });
 
+  it("keeps a multi-image response alive when one page analysis fails", async () => {
+    analyzeMistakeMock
+      .mockResolvedValueOnce({ mode: "api", analysis, analyses: [analysis] })
+      .mockRejectedValueOnce(new Error("MiniMax response was truncated at 16000 completion tokens."));
+    saveAnalysisAsMistakeMock.mockResolvedValue({
+      mistake: { id: "mistake-1" },
+      gap: { severity: "important" }
+    });
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    for (let index = 1; index <= 2; index += 1) {
+      const file = new File([`image-${index}`], `page-${index}.png`, { type: "image/png" });
+      Object.defineProperty(file, "arrayBuffer", {
+        value: async () => new TextEncoder().encode(`image-${index}`).buffer
+      });
+      formData.append("files", file);
+    }
+
+    const response = await POST({ formData: async () => formData } as Request);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.analyses).toHaveLength(2);
+    expect(body.analyses[0].questionType).toBe("选择题");
+    expect(body.analyses[1]).toMatchObject({
+      sourceImageIndex: 1,
+      subject: "英语",
+      grade: "七年级",
+      questionType: "批量分析待复核页",
+      gradingEvidence: {
+        judgement: "suspected",
+        needsConfirmation: true
+      }
+    });
+    expect(body.imageGroups[1].analyses[0].questionType).toBe("批量分析待复核页");
+    expect(saveAnalysisAsMistakeMock).toHaveBeenCalledTimes(2);
+  });
+
   it("converts HEIC uploads to JPEG before sending images to the analyzer", async () => {
     execFileMock.mockImplementation((command: string, args: string[], callback: (error: Error | null, stdout?: string, stderr?: string) => void) => {
       const outputPath = args[args.indexOf("--out") + 1];
