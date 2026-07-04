@@ -1,5 +1,7 @@
 import os
+import logging
 from io import BytesIO
+from threading import Lock
 
 from flask import Flask, jsonify, request
 from PIL import Image
@@ -9,26 +11,29 @@ from normalization import normalize_paddle_result
 
 app = Flask(__name__)
 _ocr_engine = None
+_ocr_engine_lock = Lock()
+_ocr_call_lock = Lock()
 
 
 def get_ocr_engine():
     global _ocr_engine
-    if _ocr_engine is not None:
+    with _ocr_engine_lock:
+        if _ocr_engine is not None:
+            return _ocr_engine
+
+        try:
+            from paddleocr import PaddleOCR
+        except ImportError as exc:
+            raise RuntimeError(
+                "paddleocr is not installed. Install ocr_service/requirements.txt and a matching paddlepaddle wheel."
+            ) from exc
+
+        _ocr_engine = PaddleOCR(
+            use_angle_cls=True,
+            lang=os.getenv("OCR_LANG", "ch"),
+            show_log=os.getenv("OCR_SHOW_LOG", "false").lower() == "true",
+        )
         return _ocr_engine
-
-    try:
-        from paddleocr import PaddleOCR
-    except ImportError as exc:
-        raise RuntimeError(
-            "paddleocr is not installed. Install ocr_service/requirements.txt and a matching paddlepaddle wheel."
-        ) from exc
-
-    _ocr_engine = PaddleOCR(
-        use_angle_cls=True,
-        lang=os.getenv("OCR_LANG", "ch"),
-        show_log=os.getenv("OCR_SHOW_LOG", "false").lower() == "true",
-    )
-    return _ocr_engine
 
 
 def prepare_image_for_ocr(image: Image.Image) -> Image.Image:
@@ -65,10 +70,13 @@ def ocr():
     try:
         import numpy as np
 
-        raw_result = get_ocr_engine().ocr(np.array(image), cls=True)
+        with _ocr_call_lock:
+            raw_result = get_ocr_engine().ocr(np.array(image), cls=True)
     except RuntimeError as exc:
+        app.logger.exception("OCR runtime setup failed")
         return jsonify({"success": False, "error": str(exc)}), 503
     except Exception as exc:
+        app.logger.exception("OCR engine failed")
         return jsonify({"success": False, "error": f"ocr failed: {exc}"}), 500
 
     payload = normalize_paddle_result(raw_result, grading_marks=detect_red_marks(image))
@@ -77,6 +85,7 @@ def ocr():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=os.getenv("OCR_LOG_LEVEL", "INFO"))
     host = os.getenv("OCR_HOST", "127.0.0.1")
     port = int(os.getenv("OCR_PORT", "5005"))
     app.run(host=host, port=port)

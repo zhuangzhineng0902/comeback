@@ -94,4 +94,30 @@ describe("OCR client", () => {
       })
     ).resolves.toBeNull();
   });
+
+  it("keeps OCR service error details in the failed context summary", async () => {
+    process.env.OCR_SERVICE_URL = "http://localhost:5005/ocr";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ success: false, error: "ocr failed: model busy" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+    );
+
+    const result = await analyzeImageWithOcr({
+      filename: "paper.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64"),
+      sourceImageIndex: 0
+    });
+
+    expect(result).toMatchObject({
+      engine: "ocr",
+      status: "failed",
+      summary: expect.stringContaining("model busy")
+    });
+  });
 });

@@ -16,6 +16,35 @@ type OcrInput = {
   sourceImageIndex: number;
 };
 
+const globalForOcrClient = globalThis as unknown as { ocrRequestQueue?: Promise<void> };
+globalForOcrClient.ocrRequestQueue ??= Promise.resolve();
+
+function shouldSerializeOcrRequests() {
+  return process.env.OCR_SERIALIZE_REQUESTS !== "false";
+}
+
+async function runWithOcrQueue<T>(task: () => Promise<T>): Promise<T> {
+  if (!shouldSerializeOcrRequests()) {
+    return task();
+  }
+
+  const previous = globalForOcrClient.ocrRequestQueue?.catch(() => undefined) ?? Promise.resolve();
+  let releaseQueue: () => void = () => undefined;
+  globalForOcrClient.ocrRequestQueue = previous.then(
+    () =>
+      new Promise<void>((resolve) => {
+        releaseQueue = resolve;
+      })
+  );
+
+  await previous;
+  try {
+    return await task();
+  } finally {
+    releaseQueue();
+  }
+}
+
 function normalizeNumber(value: unknown) {
   const number = typeof value === "number" ? value : Number.parseFloat(String(value));
   return Number.isFinite(number) ? number : undefined;
@@ -195,6 +224,44 @@ function getOcrTimeoutMs() {
   return Number.isFinite(configured) && configured > 0 ? configured : 45_000;
 }
 
+async function readOcrErrorDetail(response: Response) {
+  const body = await response.text().catch(() => "");
+  if (!body.trim()) {
+    return "";
+  }
+
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const record = parsed as Record<string, unknown>;
+      const error = record.error ?? record.detail ?? record.message;
+      if (typeof error === "string" && error.trim()) {
+        return error.trim();
+      }
+    }
+  } catch {
+    return body.trim().slice(0, 300);
+  }
+
+  return body.trim().slice(0, 300);
+}
+
+function buildFailedContext(input: OcrInput, error: unknown): PaperVisionContext {
+  const message = error instanceof Error ? error.message : String(error);
+  const detail = message.trim().length > 0 ? ` 原因：${message.slice(0, 180)}` : "";
+
+  return {
+    sourceImageIndex: input.sourceImageIndex,
+    engine: "ocr",
+    status: "failed",
+    summary: `OCR 预处理失败，已改用原图视觉分析。${detail}`,
+    textBlocks: [],
+    questionCandidates: [],
+    gradingMarks: [],
+    mistakeCandidates: []
+  };
+}
+
 function normalizeOcrPayload(payload: unknown, input: OcrInput): PaperVisionContext {
   const record = payload && typeof payload === "object" && !Array.isArray(payload) ? (payload as Record<string, unknown>) : {};
   const blocks = extractBlocks(record);
@@ -223,32 +290,26 @@ export async function analyzeImageWithOcr(input: OcrInput): Promise<PaperVisionC
   }
 
   try {
-    const formData = new FormData();
-    const bytes = Buffer.from(input.imageBase64, "base64");
-    formData.append("image", new Blob([bytes], { type: input.mimeType }), input.filename);
+    return await runWithOcrQueue(async () => {
+      const formData = new FormData();
+      const bytes = Buffer.from(input.imageBase64, "base64");
+      formData.append("image", new Blob([bytes], { type: input.mimeType }), input.filename);
 
-    const response = await fetch(serviceUrl, {
-      method: "POST",
-      body: formData,
-      signal: AbortSignal.timeout(getOcrTimeoutMs())
+      const response = await fetch(serviceUrl, {
+        method: "POST",
+        body: formData,
+        signal: AbortSignal.timeout(getOcrTimeoutMs())
+      });
+
+      if (!response.ok) {
+        const detail = await readOcrErrorDetail(response);
+        throw new Error(`OCR request failed with status ${response.status}${detail ? `: ${detail}` : ""}.`);
+      }
+
+      return normalizeOcrPayload(await response.json(), input);
     });
-
-    if (!response.ok) {
-      throw new Error(`OCR request failed with status ${response.status}.`);
-    }
-
-    return normalizeOcrPayload(await response.json(), input);
   } catch (error) {
     console.warn("OCR pre-processing failed; continuing without OCR evidence.", error);
-    return {
-      sourceImageIndex: input.sourceImageIndex,
-      engine: "ocr",
-      status: "failed",
-      summary: "OCR 预处理失败，已改用原图视觉分析。",
-      textBlocks: [],
-      questionCandidates: [],
-      gradingMarks: [],
-      mistakeCandidates: []
-    };
+    return buildFailedContext(input, error);
   }
 }
