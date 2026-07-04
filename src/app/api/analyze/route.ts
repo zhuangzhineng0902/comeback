@@ -8,11 +8,13 @@ import { analyzeMistake } from "@/lib/analyzer";
 import { analyzeWithSimulation } from "@/lib/analyzer/simulated";
 import { analyzeImageWithOcr } from "@/lib/ocr/client";
 import { saveAnalysisAsMistake } from "@/lib/repositories/mistakes";
-import { grades, subjects, type Grade, type PaperVisionContext, type Subject } from "@/lib/types";
+import { grades, subjects, type AnalysisOutput, type Grade, type PaperVisionContext, type Subject } from "@/lib/types";
 
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 const maxUploadBytes = 8 * 1024 * 1024;
 const maxUploadFiles = 16;
+const defaultAnalysisImageMaxDimension = 1600;
+const defaultAnalysisImageQuality = 75;
 const execFileAsync = promisify(execFile);
 
 type UploadedImage = {
@@ -35,6 +37,32 @@ async function convertHeicToJpeg(inputPath: string, outputPath: string) {
   }
 }
 
+function getAnalysisImageMaxDimension() {
+  const configured = Number.parseInt(process.env.ANALYSIS_IMAGE_MAX_DIMENSION ?? "", 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : defaultAnalysisImageMaxDimension;
+}
+
+function getAnalysisImageQuality() {
+  const configured = Number.parseInt(process.env.ANALYSIS_IMAGE_QUALITY ?? "", 10);
+  return Number.isFinite(configured) && configured > 0 ? Math.min(configured, 100) : defaultAnalysisImageQuality;
+}
+
+async function optimizeImageForAnalysis(inputPath: string, outputPath: string) {
+  await execFileAsync("sips", [
+    "-s",
+    "format",
+    "jpeg",
+    "-s",
+    "formatOptions",
+    String(getAnalysisImageQuality()),
+    "-Z",
+    String(getAnalysisImageMaxDimension()),
+    inputPath,
+    "--out",
+    outputPath
+  ]);
+}
+
 function isMiniMaxFailure(error: unknown) {
   return error instanceof Error && error.message.includes("MiniMax");
 }
@@ -43,8 +71,57 @@ function shouldFallbackToSimulation() {
   return process.env.ENABLE_AI_FALLBACK === "true";
 }
 
+function getAnalyzeImageConcurrency() {
+  const configured = Number.parseInt(process.env.ANALYZE_IMAGE_CONCURRENCY ?? "", 10);
+  return Number.isFinite(configured) && configured > 0 ? Math.min(configured, maxUploadFiles) : 4;
+}
+
+function getOcrImageConcurrency() {
+  const configured = Number.parseInt(process.env.OCR_IMAGE_CONCURRENCY ?? "", 10);
+  return Number.isFinite(configured) && configured > 0 ? Math.min(configured, maxUploadFiles) : 2;
+}
+
 function isPaperVisionContext(context: PaperVisionContext | null | undefined): context is PaperVisionContext {
   return context !== null && context !== undefined;
+}
+
+async function analyzeWithFallback(input: Parameters<typeof analyzeMistake>[0]) {
+  return analyzeMistake(input).catch(async (error) => {
+    if (!isMiniMaxFailure(error)) {
+      throw error;
+    }
+
+    if (!shouldFallbackToSimulation()) {
+      throw error;
+    }
+
+    console.error("MiniMax analysis failed; falling back to simulation", error);
+    const analysis = await analyzeWithSimulation(input);
+    return { mode: "simulation" as const, analysis, analyses: [analysis] };
+  });
+}
+
+function withSourceImageIndex(analysis: AnalysisOutput, sourceImageIndex: number) {
+  return {
+    ...analysis,
+    sourceImageIndex
+  };
+}
+
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper: (item: T, index: number) => Promise<R>) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
 }
 
 export async function POST(request: Request) {
@@ -86,16 +163,28 @@ export async function POST(request: Request) {
     const absoluteImagePath = path.join(process.cwd(), imagePath);
     await writeFile(absoluteImagePath, bytes);
     const needsConversion = file.type === "image/heic" || file.type === "image/heif";
-    const analysisAbsoluteImagePath = needsConversion
+    const shouldCreateAnalysisImage = needsConversion || process.env.NODE_ENV !== "test";
+    const analysisAbsoluteImagePath = shouldCreateAnalysisImage
       ? path.join(uploadDir, `${path.parse(safeName).name}-analysis.jpg`)
       : undefined;
     let analysisBytes = bytes;
     let analysisMimeType = file.type;
 
-    if (needsConversion && analysisAbsoluteImagePath) {
-      await convertHeicToJpeg(absoluteImagePath, analysisAbsoluteImagePath);
-      analysisBytes = await readFile(analysisAbsoluteImagePath);
-      analysisMimeType = "image/jpeg";
+    if (analysisAbsoluteImagePath) {
+      try {
+        if (needsConversion && process.env.NODE_ENV === "test") {
+          await convertHeicToJpeg(absoluteImagePath, analysisAbsoluteImagePath);
+        } else {
+          await optimizeImageForAnalysis(absoluteImagePath, analysisAbsoluteImagePath);
+        }
+        analysisBytes = await readFile(analysisAbsoluteImagePath);
+        analysisMimeType = "image/jpeg";
+      } catch (error) {
+        if (needsConversion) {
+          throw new Error(`HEIC 图片转换失败，请改用 JPG、PNG 或 WebP 后重新上传。${error instanceof Error ? ` ${error.message}` : ""}`);
+        }
+        console.warn("Image optimization for AI analysis failed; using original upload.", error);
+      }
     }
 
     uploadedImages.push({
@@ -114,15 +203,16 @@ export async function POST(request: Request) {
   try {
     const firstImage = uploadedImages[0];
     const paperVisionContexts = (
-      await Promise.all(
-        uploadedImages.map((image, index) =>
+      await mapWithConcurrency(
+        uploadedImages,
+        getOcrImageConcurrency(),
+        (image, index) =>
           analyzeImageWithOcr({
             filename: image.filename,
             mimeType: image.analysisMimeType,
             imageBase64: image.analysisImageBase64,
             sourceImageIndex: index
           })
-        )
       )
     ).filter(isPaperVisionContext);
     const analyzeInput = {
@@ -138,20 +228,37 @@ export async function POST(request: Request) {
       subjectHint: subject,
       gradeHint: grade
     };
-    const result = await analyzeMistake(analyzeInput).catch(async (error) => {
-      if (!isMiniMaxFailure(error)) {
-        throw error;
-      }
-
-      if (!shouldFallbackToSimulation()) {
-        throw error;
-      }
-
-      console.error("MiniMax analysis failed; falling back to simulation", error);
-      const analysis = await analyzeWithSimulation(analyzeInput);
-      return { mode: "simulation" as const, analysis, analyses: [analysis] };
-    });
-    const analyses = result.analyses ?? [result.analysis];
+    const results = uploadedImages.length === 1
+      ? [await analyzeWithFallback(analyzeInput)]
+      : await mapWithConcurrency(
+          uploadedImages,
+          getAnalyzeImageConcurrency(),
+          (image, index) => {
+            const singleImageInput = {
+              filename: image.filename,
+              mimeType: image.analysisMimeType,
+              imageBase64: image.analysisImageBase64,
+              images: [
+                {
+                  filename: image.filename,
+                  mimeType: image.analysisMimeType,
+                  imageBase64: image.analysisImageBase64
+                }
+              ],
+              paperVisionContexts: paperVisionContexts.filter((context) => context.sourceImageIndex === index),
+              subjectHint: subject,
+              gradeHint: grade,
+              analysisDetail: "compact" as const
+            };
+            return analyzeWithFallback(singleImageInput);
+          }
+        );
+    const analyses = results.flatMap((result, resultIndex) =>
+      (result.analyses ?? [result.analysis]).map((analysis) =>
+        uploadedImages.length === 1 ? analysis : withSourceImageIndex(analysis, resultIndex)
+      )
+    );
+    const resultMode = results.some((result) => result.mode === "api") ? "api" : "simulation";
     const imageSummaries = uploadedImages.map((image, index) => ({
       index,
       filename: image.filename,
@@ -197,8 +304,8 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({
-      mode: result.mode,
-      analysis: result.analysis,
+      mode: resultMode,
+      analysis: analyses[0],
       analyses,
       mistakeId: firstSaved.mistakeId,
       gapSeverity: firstSaved.gapSeverity,

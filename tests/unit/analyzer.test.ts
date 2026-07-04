@@ -376,6 +376,35 @@ describe("simulated analyzer", () => {
     });
   });
 
+  it("fills missing MiniMax practice questions instead of failing the page analysis", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const { practiceQuestions: _practiceQuestions, ...analysisWithoutPractice } = minimaxAnalysis;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(analysisWithoutPractice) } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const result = await analyzeMistake({
+      filename: "worksheet.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-bytes").toString("base64")
+    });
+
+    expect(result.mode).toBe("api");
+    expect(result.analysis.practiceQuestions[0]).toEqual({
+      question: "y=x-1 也要同时看 k 和 b。",
+      answer: "第一、三、四象限",
+      hint: "先看 k，再看 b，最后合并象限。"
+    });
+  });
+
   it("repairs JSON-like MiniMax content with trailing commas and unquoted keys", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     const jsonLikeContent = `{

@@ -105,6 +105,10 @@ function getMaxCompletionTokens() {
   return Number.isFinite(configured) && configured > 0 ? configured : defaultMaxCompletionTokens;
 }
 
+function getMaxCompletionTokensForInput(input: AnalyzeInput) {
+  return input.analysisDetail === "compact" ? Math.min(getMaxCompletionTokens(), 8000) : getMaxCompletionTokens();
+}
+
 function getMiniMaxTimeoutMs() {
   const configured = Number.parseInt(process.env.MINIMAX_TIMEOUT_MS ?? "", 10);
   return Number.isFinite(configured) && configured > 0 ? configured : 90_000;
@@ -247,6 +251,9 @@ function buildPrompt(input: AnalyzeInput) {
   return [
     "你是一个只服务初中学生学习的私人教师 Agent。",
     "请分析图片中的错题或习题照片，输出严格 JSON，不要输出 Markdown，不要输出解释性前后缀。",
+    input.analysisDetail === "compact"
+      ? "当前是多页批量分析模式：每道错题讲解必须紧凑，practiceQuestions 只给 1 道，walkthrough 只给 2 步，illustration.nodes 最多 3 个。"
+      : "",
     "如果图片是一整张试卷或多页试卷，请找出所有能识别出的错题；每一道错题都要单独分析，不要只分析第一题。",
     "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
     "analyses 每个元素必须完全符合字段：sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
@@ -512,6 +519,9 @@ function normalizeSingleAnalysisShape(value: unknown): unknown {
       return point;
     });
   }
+  if (!Array.isArray(record.knowledgePoints) || record.knowledgePoints.length === 0) {
+    record.knowledgePoints = [{ name: String(record.questionType), confidence: 0.5 }];
+  }
 
   if (typeof record.archetype === "string") {
     record.archetype = {
@@ -530,6 +540,14 @@ function normalizeSingleAnalysisShape(value: unknown): unknown {
       archetype.commonTraps = ["只记结论，没有套用完整母题模板"];
     }
     record.archetype = archetype;
+  }
+  if (!record.archetype || typeof record.archetype !== "object" || Array.isArray(record.archetype)) {
+    record.archetype = {
+      title: "同类母题",
+      pattern: "先识别条件，再按步骤求解。",
+      solutionTemplate: "圈条件、列步骤、核对答案。",
+      commonTraps: ["只记结论，没有套用完整母题模板"]
+    };
   }
 
   if (Array.isArray(record.practiceQuestions)) {
@@ -554,6 +572,18 @@ function normalizeSingleAnalysisShape(value: unknown): unknown {
         hint: "套用本题母题模板，先找关键条件，再按步骤判断。"
       };
     });
+  }
+  if (!Array.isArray(record.practiceQuestions) || record.practiceQuestions.length === 0) {
+    const archetype = record.archetype as Record<string, unknown>;
+    record.practiceQuestions = [
+      {
+        question: String(record.example),
+        answer: String(record.correctAnswer),
+        hint: typeof archetype.solutionTemplate === "string"
+          ? archetype.solutionTemplate
+          : "套用本题母题模板，先找关键条件，再按步骤判断。"
+      }
+    ];
   }
 
   if (record.richExplanation && typeof record.richExplanation === "object" && !Array.isArray(record.richExplanation)) {
@@ -761,7 +791,7 @@ async function repairMiniMaxContent(input: {
       thinking: { type: "disabled" },
       response_format: { type: "json_object" },
       temperature: 0,
-      max_completion_tokens: getMaxCompletionTokens()
+      max_completion_tokens: getMaxCompletionTokensForInput(input.analyzeInput)
     }
   });
 }
@@ -786,7 +816,7 @@ async function repairMiniMaxContentCompact(input: {
       thinking: { type: "disabled" },
       response_format: { type: "json_object" },
       temperature: 0,
-      max_completion_tokens: getMaxCompletionTokens()
+      max_completion_tokens: getMaxCompletionTokensForInput(input.analyzeInput)
     }
   });
 }
@@ -810,7 +840,7 @@ async function analyzeMiniMaxOcrOnly(input: {
       thinking: { type: "disabled" },
       response_format: { type: "json_object" },
       temperature: 0.1,
-      max_completion_tokens: getMaxCompletionTokens()
+      max_completion_tokens: getMaxCompletionTokensForInput(input.analyzeInput)
     }
   });
 }
@@ -835,7 +865,7 @@ async function expandMiniMaxCoverage(input: {
       thinking: { type: "disabled" },
       response_format: { type: "json_object" },
       temperature: 0,
-      max_completion_tokens: getMaxCompletionTokens()
+      max_completion_tokens: getMaxCompletionTokensForInput(input.analyzeInput)
     }
   });
 }
@@ -1019,7 +1049,7 @@ export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisO
         thinking: { type: "disabled" },
         response_format: { type: "json_object" },
         temperature: 0.2,
-        max_completion_tokens: getMaxCompletionTokens()
+        max_completion_tokens: getMaxCompletionTokensForInput(input)
       }
     });
   } catch (error) {

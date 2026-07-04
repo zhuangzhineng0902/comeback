@@ -12,6 +12,7 @@ export type AnalyzeInput = {
   paperVisionContexts?: PaperVisionContext[];
   subjectHint?: Subject;
   gradeHint?: Grade;
+  analysisDetail?: "full" | "compact";
 };
 
 export async function analyzeWithSimulation(input: AnalyzeInput): Promise<AnalysisOutput> {

@@ -189,7 +189,9 @@ describe("api routes", () => {
 
   it("analyzes up to sixteen uploaded images without subject or grade hints", async () => {
     const secondAnalysis = { ...analysis, sourceImageIndex: 1, questionType: "第二道选择题", mistakeReason: "第二题错因" };
-    analyzeMistakeMock.mockResolvedValue({ mode: "api", analysis, analyses: [analysis, secondAnalysis] });
+    analyzeMistakeMock
+      .mockResolvedValueOnce({ mode: "api", analysis, analyses: [analysis] })
+      .mockResolvedValueOnce({ mode: "api", analysis: secondAnalysis, analyses: [secondAnalysis] });
     saveAnalysisAsMistakeMock.mockResolvedValue({
       mistake: { id: "mistake-1" },
       gap: { severity: "important" }
@@ -232,23 +234,37 @@ describe("api routes", () => {
     });
     expect(body.uploadedImages[0].url).toMatch(/^\/api\/uploads\/[0-9a-f-]+-page-1\.png$/);
     expect(body.uploadedImages[1].url).toMatch(/^\/api\/uploads\/[0-9a-f-]+-page-2\.png$/);
-    expect(analyzeMistakeMock).toHaveBeenCalledWith({
-      filename: "page-1.png, page-2.png",
+    expect(analyzeMistakeMock).toHaveBeenCalledTimes(2);
+    expect(analyzeMistakeMock).toHaveBeenNthCalledWith(1, {
+      filename: "page-1.png",
       mimeType: "image/png",
       imageBase64: Buffer.from("image-1").toString("base64"),
       images: [
-        { filename: "page-1.png", mimeType: "image/png", imageBase64: Buffer.from("image-1").toString("base64") },
+        { filename: "page-1.png", mimeType: "image/png", imageBase64: Buffer.from("image-1").toString("base64") }
+      ],
+      paperVisionContexts: [],
+      subjectHint: undefined,
+      gradeHint: undefined,
+      analysisDetail: "compact"
+    });
+    expect(analyzeMistakeMock).toHaveBeenNthCalledWith(2, {
+      filename: "page-2.png",
+      mimeType: "image/png",
+      imageBase64: Buffer.from("image-2").toString("base64"),
+      images: [
         { filename: "page-2.png", mimeType: "image/png", imageBase64: Buffer.from("image-2").toString("base64") }
       ],
+      paperVisionContexts: [],
       subjectHint: undefined,
-      gradeHint: undefined
+      gradeHint: undefined,
+      analysisDetail: "compact"
     });
     expect(saveAnalysisAsMistakeMock).toHaveBeenCalledTimes(2);
     expect(saveAnalysisAsMistakeMock).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
         imagePath: expect.stringMatching(/^uploads\/[0-9a-f-]+-page-1\.png$/),
-        analysis
+        analysis: { ...analysis, sourceImageIndex: 0 }
       })
     );
     expect(saveAnalysisAsMistakeMock).toHaveBeenNthCalledWith(
