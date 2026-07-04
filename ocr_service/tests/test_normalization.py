@@ -120,6 +120,27 @@ class NormalizePaddleResultTest(unittest.TestCase):
         q1_candidate = next(candidate for candidate in payload["mistakeCandidates"] if candidate["questionId"] == "1")
         self.assertLess(q1_candidate["bbox"][3], 300)
 
+    def test_binds_red_correction_on_right_side_of_left_column_question(self):
+        result = [
+            [
+                [[[105, 227], [619, 227], [619, 252], [105, 252]], ("1. 第一题", 0.97)],
+                [[[75, 260], [395, 260], [395, 290], [75, 290]], ("2. 上一题", 0.97)],
+                [[[77, 380], [610, 380], [610, 410], [77, 410]], ("3. 已知△ABC，求作△A'B'C'", 0.92)],
+                [[[77, 498], [480, 498], [480, 530], [77, 530]], ("4. 下一题", 0.88)],
+                [[[975, 145], [1365, 145], [1365, 175], [975, 175]], ("9. 右栏题目", 0.95)],
+                [[[973, 190], [1365, 190], [1365, 220], [973, 220]], ("10. 右栏题目", 0.95)],
+                [[[975, 233], [1453, 233], [1453, 257], [975, 257]], ("11. 右栏题目", 0.95)],
+            ]
+        ]
+        grading_marks = [
+            {"markType": "unknown", "bbox": [492, 420, 498, 426], "confidence": 0.47, "source": "red-ink"},
+        ]
+
+        payload = normalize_paddle_result(result, grading_marks=grading_marks)
+
+        q3_candidate = next(candidate for candidate in payload["mistakeCandidates"] if candidate["questionId"] == "3")
+        self.assertEqual(q3_candidate["judgement"], "suspected")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -221,7 +221,7 @@ def _find_nearest_question(mark: dict[str, Any], questions: list[dict[str, Any]]
     question_centers = [_center(question.get("bbox")) for question in questions]
     x_centers = sorted(center[0] for center in question_centers if center)
     median_x = x_centers[len(x_centers) // 2] if x_centers else mark_center[0]
-    prefer_right_column = mark_center[0] > median_x
+    prefer_right_column = mark_center[0] > median_x + 220
     ranked = []
     for question in questions:
         question_box = question.get("bbox")
