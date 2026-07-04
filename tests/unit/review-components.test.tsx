@@ -1,10 +1,11 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { IllustrationRenderer } from "@/components/IllustrationRenderer";
 import { KnowledgeTreeView } from "@/components/KnowledgeTreeView";
 import { MistakeList } from "@/components/MistakeList";
+import { OriginalPhotoViewer } from "@/components/OriginalPhotoViewer";
 import { RichExplanationCard } from "@/components/RichExplanationCard";
 import { SeverityBadge } from "@/components/SeverityBadge";
 
@@ -196,5 +197,18 @@ describe("review components", () => {
     expect(screen.getByRole("link", { name: "函数" }).getAttribute("href")).toBe("/knowledge-points/root");
     expect(screen.getByRole("link", { name: "一次函数图像与性质" }).getAttribute("href")).toBe("/knowledge-points/child");
     expect(screen.getByRole("link", { name: "查看函数解析详情" }).getAttribute("href")).toBe("/knowledge-points/root");
+  });
+
+  it("renders the original uploaded photo and opens it for comparison", () => {
+    render(<OriginalPhotoViewer filename="试卷.png" imageUrl="/api/uploads/paper.png" />);
+
+    expect(screen.getByText("原始上传照片")).toBeTruthy();
+    expect(screen.getByText("点击图片查看原图：试卷.png")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "试卷.png 原图预览" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看 试卷.png 原图" }));
+
+    expect(screen.getByRole("dialog", { name: "试卷.png 原图" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "试卷.png 原图" })).toBeTruthy();
   });
 });

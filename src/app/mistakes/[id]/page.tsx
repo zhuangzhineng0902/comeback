@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
+import path from "node:path";
 import React from "react";
 
+import { OriginalPhotoViewer } from "@/components/OriginalPhotoViewer";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +14,10 @@ function parseTraps(value: string) {
   } catch {
     return [];
   }
+}
+
+function uploadedImageUrl(imagePath: string) {
+  return `/api/uploads/${encodeURIComponent(path.basename(imagePath))}`;
 }
 
 export default async function MistakeDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -27,6 +33,8 @@ export default async function MistakeDetailPage({ params }: { params: Promise<{ 
   if (!mistake) {
     notFound();
   }
+
+  const originalFilename = path.basename(mistake.imagePath);
 
   return (
     <article className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -58,6 +66,8 @@ export default async function MistakeDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <aside className="space-y-4">
+        <OriginalPhotoViewer filename={originalFilename} imageUrl={uploadedImageUrl(mistake.imagePath)} />
+
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="font-semibold text-ink">母题</h2>
           {mistake.mistakeArchetypes.length === 0 ? (
