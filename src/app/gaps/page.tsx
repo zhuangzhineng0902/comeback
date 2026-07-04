@@ -25,30 +25,27 @@ export default async function GapsPage() {
           </p>
         ) : (
           gaps.map((gap) => (
-            <article key={gap.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <Link
+              key={gap.id}
+              href={`/knowledge-points/${gap.knowledgePoint.id}`}
+              className="block rounded-lg border border-slate-200 bg-white p-4 shadow-sm hover:border-sky-300"
+            >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs text-slate-500">
                     {gap.knowledgePoint.grade} · {gap.knowledgePoint.subject}
                   </p>
-                  <h2 className="mt-1 font-semibold text-ink">
-                    <Link href={`/knowledge-points/${gap.knowledgePoint.id}`} className="hover:text-sky-700">
-                      {gap.knowledgePoint.name}
-                    </Link>
-                  </h2>
+                  <h2 className="mt-1 font-semibold text-ink">{gap.knowledgePoint.name}</h2>
                 </div>
                 <SeverityBadge severity={gap.severity} />
               </div>
               <p className="mt-3 text-sm leading-6 text-slate-600">
                 错误 {gap.errorCount} 次，高频母题 {gap.repeatedArchetypeCount} 次。{gap.reviewSuggestion}
               </p>
-              <Link
-                href={`/knowledge-points/${gap.knowledgePoint.id}`}
-                className="mt-3 inline-flex rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:border-sky-300 hover:text-sky-700"
-              >
+              <span className="mt-3 inline-flex rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700">
                 查看知识点详情
-              </Link>
-            </article>
+              </span>
+            </Link>
           ))
         )}
       </div>

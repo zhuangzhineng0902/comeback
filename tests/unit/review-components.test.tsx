@@ -195,5 +195,6 @@ describe("review components", () => {
     expect(screen.getByText("函数 · 错误 3 次 · 高频母题 2 次")).toBeTruthy();
     expect(screen.getByRole("link", { name: "函数" }).getAttribute("href")).toBe("/knowledge-points/root");
     expect(screen.getByRole("link", { name: "一次函数图像与性质" }).getAttribute("href")).toBe("/knowledge-points/child");
+    expect(screen.getByRole("link", { name: "查看函数解析详情" }).getAttribute("href")).toBe("/knowledge-points/root");
   });
 });

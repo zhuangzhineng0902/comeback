@@ -25,7 +25,16 @@ function NodeView({ node, depth = 0 }: { node: TreeNode; depth?: number }) {
             {node.chapter} · 错误 {node.errorCount} 次 · 高频母题 {node.repeatedArchetypeCount} 次
           </p>
         </div>
-        <SeverityBadge severity={node.severity} />
+        <div className="flex flex-wrap items-center gap-2">
+          <SeverityBadge severity={node.severity} />
+          <Link
+            href={`/knowledge-points/${node.id}`}
+            className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-sky-300 hover:text-sky-700"
+            aria-label={`查看${node.name}解析详情`}
+          >
+            查看解析
+          </Link>
+        </div>
       </div>
       {node.children.length > 0 ? (
         <ul className="mt-3 grid gap-2">
