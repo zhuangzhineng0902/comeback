@@ -25,6 +25,30 @@ class NormalizePaddleResultTest(unittest.TestCase):
         self.assertEqual(payload["questionCandidates"][0]["questionId"], "1")
         self.assertIn("解方程", payload["questionCandidates"][0]["text"])
 
+    def test_builds_mistake_candidates_from_red_marks_near_questions(self):
+        result = [
+            [
+                [[[100, 100], [360, 100], [360, 130], [100, 130]], ("9. 64 的算术平方根是____", 0.96)],
+                [[[100, 300], [520, 300], [520, 330], [100, 330]], ("14. 计算：（1）-（7）", 0.94)],
+                [[[120, 350], [320, 350], [320, 380], [120, 380]], ("(2) 4x² - 36 = 0", 0.91)],
+            ]
+        ]
+        grading_marks = [
+            {"markType": "cross", "bbox": [330, 342, 380, 392], "confidence": 0.88, "source": "red-ink"},
+            {"markType": "deduction", "bbox": [390, 335, 430, 370], "confidence": 0.7, "markText": "-2", "source": "red-ink"},
+        ]
+
+        payload = normalize_paddle_result(result, grading_marks=grading_marks)
+
+        self.assertEqual(len(payload["gradingMarks"]), 2)
+        self.assertGreaterEqual(len(payload["mistakeCandidates"]), 1)
+        candidate = payload["mistakeCandidates"][0]
+        self.assertEqual(candidate["questionId"], "14")
+        self.assertEqual(candidate["subQuestionId"], "2")
+        self.assertIn("cross", candidate["markTypes"])
+        self.assertIn("deduction", candidate["markTypes"])
+        self.assertEqual(candidate["judgement"], "partial")
+
 
 if __name__ == "__main__":
     unittest.main()

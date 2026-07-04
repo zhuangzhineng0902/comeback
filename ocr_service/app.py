@@ -4,6 +4,7 @@ from io import BytesIO
 from flask import Flask, jsonify, request
 from PIL import Image
 
+from marks import detect_red_marks
 from normalization import normalize_paddle_result
 
 app = Flask(__name__)
@@ -70,7 +71,7 @@ def ocr():
     except Exception as exc:
         return jsonify({"success": False, "error": f"ocr failed: {exc}"}), 500
 
-    payload = normalize_paddle_result(raw_result)
+    payload = normalize_paddle_result(raw_result, grading_marks=detect_red_marks(image))
     payload["filename"] = uploaded.filename
     return jsonify(payload)
 

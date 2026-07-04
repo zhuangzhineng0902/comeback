@@ -25,6 +25,20 @@ describe("OCR client", () => {
               bbox: [10, 20, 480, 130],
               confidence: 0.9
             }
+          ],
+          gradingMarks: [
+            { markType: "cross", bbox: [500, 95, 540, 135], confidence: "0.88", source: "red-ink" }
+          ],
+          mistakeCandidates: [
+            {
+              questionId: "1",
+              text: "解方程 x + 2 = 5",
+              bbox: [10, 20, 540, 135],
+              confidence: 0.86,
+              markTypes: ["cross"],
+              judgement: "wrong",
+              evidenceSummary: "题目旁有红叉。"
+            }
           ]
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
@@ -48,7 +62,19 @@ describe("OCR client", () => {
         { text: "1. 解方程 x + 2 = 5", bbox: [10, 20, 300, 60], confidence: 0.96, role: "question" },
         { text: "学生答案：x = 2", bbox: [320, 90, 480, 130], confidence: 0.84, role: "studentAnswer" }
       ],
-      questionCandidates: [{ questionId: "1", text: "解方程 x + 2 = 5", bbox: [10, 20, 480, 130], confidence: 0.9 }]
+      questionCandidates: [{ questionId: "1", text: "解方程 x + 2 = 5", bbox: [10, 20, 480, 130], confidence: 0.9 }],
+      gradingMarks: [{ markType: "cross", bbox: [500, 95, 540, 135], confidence: 0.88, source: "red-ink" }],
+      mistakeCandidates: [
+        {
+          questionId: "1",
+          text: "解方程 x + 2 = 5",
+          bbox: [10, 20, 540, 135],
+          confidence: 0.86,
+          markTypes: ["cross"],
+          judgement: "wrong",
+          evidenceSummary: "题目旁有红叉。"
+        }
+      ]
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:5005/ocr",

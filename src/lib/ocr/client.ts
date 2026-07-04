@@ -1,4 +1,13 @@
-import type { PaperVisionBox, PaperVisionContext, PaperVisionQuestionCandidate, PaperVisionTextBlock } from "@/lib/types";
+import type {
+  GradingMarkType,
+  MistakeJudgement,
+  PaperVisionBox,
+  PaperVisionContext,
+  PaperVisionGradingMark,
+  PaperVisionMistakeCandidate,
+  PaperVisionQuestionCandidate,
+  PaperVisionTextBlock
+} from "@/lib/types";
 
 type OcrInput = {
   filename: string;
@@ -78,6 +87,66 @@ function normalizeQuestionCandidate(value: unknown): PaperVisionQuestionCandidat
   };
 }
 
+function normalizeMarkType(value: unknown): GradingMarkType {
+  const text = String(value ?? "").trim();
+  if (["check", "cross", "partial", "deduction", "circle", "question", "none", "unknown"].includes(text)) {
+    return text as GradingMarkType;
+  }
+  return "unknown";
+}
+
+function normalizeJudgement(value: unknown): MistakeJudgement {
+  const text = String(value ?? "").trim();
+  if (["wrong", "partial", "suspected", "correct", "unknown"].includes(text)) {
+    return text as MistakeJudgement;
+  }
+  return "unknown";
+}
+
+function normalizeGradingMark(value: unknown): PaperVisionGradingMark | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const markText = record.markText ?? record.text;
+  const source = record.source;
+
+  return {
+    markType: normalizeMarkType(record.markType ?? record.type),
+    markText: typeof markText === "string" && markText.trim().length > 0 ? markText.trim() : undefined,
+    bbox: normalizeBox(record.bbox ?? record.box ?? record.position),
+    confidence: normalizeNumber(record.confidence ?? record.score ?? record.probability),
+    source: source === "red-ink" || source === "ocr-text" || source === "vision" || source === "unknown" ? source : undefined
+  };
+}
+
+function normalizeMistakeCandidate(value: unknown): PaperVisionMistakeCandidate | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const questionId = record.questionId ?? record.id ?? record.number;
+  const subQuestionId = record.subQuestionId ?? record.subId;
+  const text = record.text ?? record.content ?? record.question;
+  const markTypes = Array.isArray(record.markTypes)
+    ? record.markTypes.map(normalizeMarkType).filter((markType) => markType !== "unknown")
+    : [];
+  const evidenceSummary = record.evidenceSummary ?? record.summary;
+
+  return {
+    questionId: typeof questionId === "string" || typeof questionId === "number" ? String(questionId).trim() : undefined,
+    subQuestionId: typeof subQuestionId === "string" || typeof subQuestionId === "number" ? String(subQuestionId).trim() : undefined,
+    text: typeof text === "string" && text.trim().length > 0 ? text.trim() : undefined,
+    bbox: normalizeBox(record.bbox ?? record.box ?? record.position),
+    confidence: normalizeNumber(record.confidence ?? record.score ?? record.probability),
+    markTypes: markTypes.length > 0 ? markTypes : ["unknown"],
+    judgement: normalizeJudgement(record.judgement),
+    evidenceSummary: typeof evidenceSummary === "string" && evidenceSummary.trim().length > 0 ? evidenceSummary.trim() : "OCR 发现疑似批改标记。"
+  };
+}
+
 function extractBlocks(payload: Record<string, unknown>) {
   const data = payload.data && typeof payload.data === "object" ? (payload.data as Record<string, unknown>) : undefined;
   const candidates = [
@@ -100,24 +169,25 @@ function extractBlocks(payload: Record<string, unknown>) {
   return [];
 }
 
-function extractQuestionCandidates(payload: Record<string, unknown>) {
+function extractArray<T>(
+  payload: Record<string, unknown>,
+  keys: string[],
+  normalizer: (value: unknown) => T | null
+) {
   const data = payload.data && typeof payload.data === "object" ? (payload.data as Record<string, unknown>) : undefined;
-  const candidates = [
-    payload.questionCandidates,
-    payload.questions,
-    payload.questionBlocks,
-    data?.questionCandidates,
-    data?.questions,
-    data?.questionBlocks
-  ];
+  const candidates = keys.flatMap((key) => [payload[key], data?.[key]]);
 
   for (const candidate of candidates) {
     if (Array.isArray(candidate)) {
-      return candidate.map(normalizeQuestionCandidate).filter((item): item is PaperVisionQuestionCandidate => Boolean(item));
+      return candidate.map(normalizer).filter((item): item is T => Boolean(item));
     }
   }
 
   return [];
+}
+
+function extractQuestionCandidates(payload: Record<string, unknown>) {
+  return extractArray(payload, ["questionCandidates", "questions", "questionBlocks"], normalizeQuestionCandidate);
 }
 
 function getOcrTimeoutMs() {
@@ -130,6 +200,8 @@ function normalizeOcrPayload(payload: unknown, input: OcrInput): PaperVisionCont
   const blocks = extractBlocks(record);
   const rawText = collectRawText(record, blocks);
   const questionCandidates = extractQuestionCandidates(record);
+  const gradingMarks = extractArray(record, ["gradingMarks", "marks", "teacherMarks"], normalizeGradingMark);
+  const mistakeCandidates = extractArray(record, ["mistakeCandidates", "wrongQuestionCandidates"], normalizeMistakeCandidate);
 
   return {
     sourceImageIndex: input.sourceImageIndex,
@@ -138,7 +210,9 @@ function normalizeOcrPayload(payload: unknown, input: OcrInput): PaperVisionCont
     summary: blocks.length > 0 ? `识别 ${blocks.length} 个文字块` : "OCR 未识别到有效文字块",
     rawText,
     textBlocks: blocks.slice(0, 80),
-    questionCandidates: questionCandidates.slice(0, 40)
+    questionCandidates: questionCandidates.slice(0, 40),
+    gradingMarks: gradingMarks.slice(0, 80),
+    mistakeCandidates: mistakeCandidates.slice(0, 40)
   };
 }
 
@@ -172,7 +246,9 @@ export async function analyzeImageWithOcr(input: OcrInput): Promise<PaperVisionC
       status: "failed",
       summary: "OCR 预处理失败，已改用原图视觉分析。",
       textBlocks: [],
-      questionCandidates: []
+      questionCandidates: [],
+      gradingMarks: [],
+      mistakeCandidates: []
     };
   }
 }

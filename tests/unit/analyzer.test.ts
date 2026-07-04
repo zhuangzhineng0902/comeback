@@ -744,6 +744,20 @@ describe("simulated analyzer", () => {
           ],
           questionCandidates: [
             { questionId: "1", text: "There ____ a book on the desk.", bbox: [10, 20, 420, 140], confidence: 0.9 }
+          ],
+          gradingMarks: [
+            { markType: "partial", bbox: [500, 90, 540, 130], confidence: 0.82, source: "red-ink" }
+          ],
+          mistakeCandidates: [
+            {
+              questionId: "1",
+              text: "There ____ a book on the desk.",
+              bbox: [10, 20, 540, 140],
+              confidence: 0.86,
+              markTypes: ["partial"],
+              judgement: "partial",
+              evidenceSummary: "题号附近有半对批改符号。"
+            }
           ]
         }
       ]
@@ -757,6 +771,9 @@ describe("simulated analyzer", () => {
     expect(prompt).toContain("There ____ a book on the desk.");
     expect(prompt).toContain("[10,20,300,60]");
     expect(prompt).toContain("优先用 OCR 文本校对题干");
+    expect(prompt).toContain("错题候选");
+    expect(prompt).toContain("必须逐个分析 mistakeCandidates");
+    expect(prompt).toContain("partial");
     expect(prompt).not.toContain("RAW_SHOULD_BE_OMITTED");
   });
 
@@ -1013,6 +1030,150 @@ describe("simulated analyzer", () => {
     };
     expect(retryBody.messages[0].content).toContain("OCR-only");
     expect(retryBody.messages[0].content).toContain("不要再请求或等待图片视觉识别");
+  });
+
+  it("asks MiniMax to expand coverage when mistake candidates are omitted", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const expanded = {
+      analyses: [
+        minimaxAnalysis,
+        {
+          ...minimaxAnalysis,
+          questionType: "填空题",
+          recognizedText: "9. 64 的算术平方根是____",
+          studentAnswer: "8",
+          correctAnswer: "8",
+          mistakeReason: "题号旁有批改痕迹，需要复核填空答案。",
+          gradingEvidence: {
+            markType: "cross",
+            teacherMarkConfidence: 0.7,
+            answerMatchConfidence: 0.5,
+            judgement: "suspected",
+            isPartialCredit: false,
+            needsConfirmation: true,
+            evidenceSummary: "OCR 错题候选显示第 9 题附近有红笔标记。",
+            studentAnswerLocation: "第 9 题填空横线附近"
+          }
+        }
+      ]
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify({ analyses: [minimaxAnalysis] }) } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify(expanded) } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeMistake({
+      filename: "paper.png",
+      mimeType: "image/png",
+      imageBase64: "image-bytes",
+      paperVisionContexts: [
+        {
+          sourceImageIndex: 0,
+          engine: "ocr",
+          status: "available",
+          summary: "识别 2 个文字块",
+          textBlocks: [{ text: "9. 64 的算术平方根是____", bbox: [10, 20, 300, 60] }],
+          questionCandidates: [{ questionId: "9", text: "64 的算术平方根是____", bbox: [10, 20, 300, 60] }],
+          mistakeCandidates: [
+            {
+              questionId: "9",
+              text: "64 的算术平方根是____",
+              bbox: [10, 20, 360, 80],
+              confidence: 0.8,
+              markTypes: ["cross"],
+              judgement: "wrong",
+              evidenceSummary: "题号旁有红叉。"
+            },
+            {
+              questionId: "14",
+              subQuestionId: "2",
+              text: "4x² - 36 = 0",
+              bbox: [10, 200, 360, 260],
+              confidence: 0.8,
+              markTypes: ["cross"],
+              judgement: "wrong",
+              evidenceSummary: "解答小题旁有红叉。"
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result.analyses).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const coverageBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)) as {
+      messages: Array<{ content: string }>;
+    };
+    expect(coverageBody.messages[0].content).toContain("覆盖校验");
+    expect(coverageBody.messages[0].content).toContain("必须补齐所有 mistakeCandidates");
+  });
+
+  it("keeps OCR mistake candidates as suspected analyses when coverage expansion is malformed", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify({ analyses: [minimaxAnalysis] }) } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "{\"analyses\":[{\"questionType\" \"bad\"}]" } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeMistake({
+      filename: "paper.png",
+      mimeType: "image/png",
+      imageBase64: "image-bytes",
+      paperVisionContexts: [
+        {
+          sourceImageIndex: 0,
+          engine: "ocr",
+          status: "available",
+          summary: "识别 2 个文字块",
+          textBlocks: [{ text: "13. DF 的长是____", bbox: [10, 20, 300, 60] }],
+          questionCandidates: [{ questionId: "13", text: "DF 的长是____", bbox: [10, 20, 300, 60] }],
+          mistakeCandidates: [
+            {
+              questionId: "13",
+              text: "DF 的长是____",
+              bbox: [10, 20, 360, 80],
+              confidence: 0.72,
+              markTypes: ["unknown"],
+              judgement: "suspected",
+              evidenceSummary: "题号旁有红笔痕迹。"
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result.analyses.some((analysis) => analysis.questionType.includes("OCR候选"))).toBe(true);
+    expect(result.analyses.at(-1)?.gradingEvidence?.needsConfirmation).toBe(true);
   });
 
   it("repairs rich explanations with malformed illustration types instead of dropping them", async () => {

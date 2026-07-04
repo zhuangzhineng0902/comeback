@@ -73,6 +73,25 @@ export type PaperVisionQuestionCandidate = {
   confidence?: number;
 };
 
+export type PaperVisionGradingMark = {
+  markType: GradingMarkType;
+  markText?: string;
+  bbox?: PaperVisionBox;
+  confidence?: number;
+  source?: "red-ink" | "ocr-text" | "vision" | "unknown";
+};
+
+export type PaperVisionMistakeCandidate = {
+  questionId?: string;
+  subQuestionId?: string;
+  text?: string;
+  bbox?: PaperVisionBox;
+  confidence?: number;
+  markTypes: GradingMarkType[];
+  judgement: MistakeJudgement;
+  evidenceSummary: string;
+};
+
 export type PaperVisionContext = {
   sourceImageIndex: number;
   engine: "ocr" | "autocut" | "vision" | "unknown";
@@ -81,6 +100,8 @@ export type PaperVisionContext = {
   rawText?: string;
   textBlocks: PaperVisionTextBlock[];
   questionCandidates: PaperVisionQuestionCandidate[];
+  gradingMarks?: PaperVisionGradingMark[];
+  mistakeCandidates?: PaperVisionMistakeCandidate[];
 };
 
 export type AnalysisOutput = {

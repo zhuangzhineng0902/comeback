@@ -190,5 +190,5 @@ export async function saveAnalysisAsMistake(input: SaveAnalysisInput) {
     });
 
     return { mistake, gap, knowledgePoint, archetype };
-  });
+  }, { maxWait: 10_000, timeout: 20_000 });
 }

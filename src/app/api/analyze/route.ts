@@ -157,27 +157,26 @@ export async function POST(request: Request) {
       filename: image.filename,
       url: `/api/uploads/${encodeURIComponent(image.safeName)}`
     }));
-    const savedMistakes = await Promise.all(
-      analyses.map(async (analysis) => {
-        const sourceImageIndex =
-          typeof analysis.sourceImageIndex === "number" &&
-          analysis.sourceImageIndex >= 0 &&
-          analysis.sourceImageIndex < uploadedImages.length
-            ? analysis.sourceImageIndex
-            : 0;
-        const sourceImage = uploadedImages[sourceImageIndex] ?? firstImage;
-        const saved = await saveAnalysisAsMistake({
-          studentId: "default-student",
-          imagePath: sourceImage.imagePath,
-          analysis
-        });
+    const savedMistakes: Array<{ mistakeId: string; gapSeverity: string }> = [];
+    for (const analysis of analyses) {
+      const sourceImageIndex =
+        typeof analysis.sourceImageIndex === "number" &&
+        analysis.sourceImageIndex >= 0 &&
+        analysis.sourceImageIndex < uploadedImages.length
+          ? analysis.sourceImageIndex
+          : 0;
+      const sourceImage = uploadedImages[sourceImageIndex] ?? firstImage;
+      const saved = await saveAnalysisAsMistake({
+        studentId: "default-student",
+        imagePath: sourceImage.imagePath,
+        analysis
+      });
 
-        return {
-          mistakeId: saved.mistake.id,
-          gapSeverity: saved.gap.severity
-        };
-      })
-    );
+      savedMistakes.push({
+        mistakeId: saved.mistake.id,
+        gapSeverity: saved.gap.severity
+      });
+    }
     const firstSaved = savedMistakes[0];
     const imageGroups = imageSummaries.map((image) => ({
       image,

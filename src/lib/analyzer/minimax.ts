@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { AnalyzeInput } from "@/lib/analyzer/simulated";
-import { grades, subjects, type AnalysisOutput } from "@/lib/types";
+import { grades, subjects, type AnalysisOutput, type Grade, type PaperVisionMistakeCandidate, type Subject } from "@/lib/types";
 
 const defaultMiniMaxBaseUrl = "https://api.minimaxi.com/v1";
 const defaultModel = "MiniMax-M3";
@@ -199,6 +199,25 @@ function formatPaperVisionContexts(input: AnalyzeInput) {
       bbox: formatBox(question.bbox),
       confidence: question.confidence
     }));
+    const gradingMarks = context.gradingMarks?.slice(0, 30).map((mark, index) => ({
+      index: index + 1,
+      markType: mark.markType,
+      markText: mark.markText,
+      bbox: formatBox(mark.bbox),
+      confidence: mark.confidence,
+      source: mark.source
+    })) ?? [];
+    const mistakeCandidates = context.mistakeCandidates?.slice(0, 30).map((candidate, index) => ({
+      index: index + 1,
+      questionId: candidate.questionId,
+      subQuestionId: candidate.subQuestionId,
+      text: candidate.text,
+      bbox: formatBox(candidate.bbox),
+      confidence: candidate.confidence,
+      markTypes: candidate.markTypes,
+      judgement: candidate.judgement,
+      evidenceSummary: candidate.evidenceSummary
+    })) ?? [];
 
     return {
       sourceImageIndex: context.sourceImageIndex,
@@ -206,13 +225,17 @@ function formatPaperVisionContexts(input: AnalyzeInput) {
       status: context.status,
       summary: context.summary,
       textBlocks,
-      questionCandidates
+      questionCandidates,
+      gradingMarks,
+      mistakeCandidates
     };
   });
 
   return [
     "OCR 前置识别结果如下，这是给你定位题号、题干、学生答案区域和版面的紧凑证据层。",
     "请优先用 OCR 文本校对题干、题号、选项和普通印刷文字；同时必须继续查看原图来识别手写答案、批改符号、涂改痕迹和公式细节。",
+    "如果存在 mistakeCandidates（错题候选），必须逐个分析 mistakeCandidates；除非原图能明确证明候选是全对，否则每个候选都要在 analyses 中输出一项。",
+    "mistakeCandidates 来自题号、红笔批改标记和空间位置匹配；填空题、解答题、小题候选也必须覆盖，不要只返回选择题或第一题。",
     "如果 OCR 文本与图片视觉冲突，以原图为准，并在 gradingEvidence.evidenceSummary 中说明冲突。",
     "坐标 bbox 格式为 [x1,y1,x2,y2]，可用于判断学生答案是否离题干较远。",
     JSON.stringify(contexts)
@@ -322,6 +345,20 @@ function buildOcrOnlyPrompt(input: AnalyzeInput) {
     "practiceQuestions 只给 1 道；richExplanation.walkthrough 只给 2 到 3 步；illustration.nodes 最多 4 个；保持内容紧凑。",
     paperVisionContext,
     `用户提示学科：${input.subjectHint ?? "未提供，请根据 OCR 自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请根据 OCR 自动识别"}；文件名：${input.filename}。`
+  ].filter(Boolean).join("\n");
+}
+
+function buildCoveragePrompt(input: AnalyzeInput, existingAnalyses: AnalysisOutput[]) {
+  const paperVisionContext = formatPaperVisionContexts(input);
+  return [
+    "覆盖校验：上一次分析遗漏了 OCR 错题候选。",
+    "请重新输出完整严格 JSON，顶层为 {\"analyses\":[...]}。",
+    "必须补齐所有 mistakeCandidates；每一个 mistakeCandidate 至少对应 analyses 中一项。",
+    "如果候选不确定，也要输出 suspected，并设置 gradingEvidence.needsConfirmation 为 true，不要直接丢弃。",
+    "可以保留已有分析，但必须覆盖填空题、解答题、小题候选，不要只分析选择题。",
+    paperVisionContext,
+    "已有分析：",
+    JSON.stringify({ analyses: existingAnalyses })
   ].filter(Boolean).join("\n");
 }
 
@@ -776,8 +813,167 @@ async function analyzeMiniMaxOcrOnly(input: {
   });
 }
 
+async function expandMiniMaxCoverage(input: {
+  baseUrl: string;
+  apiKey: string;
+  analyzeInput: AnalyzeInput;
+  existingAnalyses: AnalysisOutput[];
+}) {
+  return postMiniMax({
+    baseUrl: input.baseUrl,
+    apiKey: input.apiKey,
+    body: {
+      model: process.env.MINIMAX_MODEL ?? defaultModel,
+      messages: [
+        {
+          role: "user",
+          content: buildCoveragePrompt(input.analyzeInput, input.existingAnalyses)
+        }
+      ],
+      thinking: { type: "disabled" },
+      response_format: { type: "json_object" },
+      temperature: 0,
+      max_completion_tokens: getMaxCompletionTokens()
+    }
+  });
+}
+
 function isMiniMaxTimeout(error: unknown) {
   return error instanceof Error && error.message.includes("MiniMax request timed out");
+}
+
+function getMistakeCandidateCount(input: AnalyzeInput) {
+  return input.paperVisionContexts?.reduce((count, context) => count + (context.mistakeCandidates?.length ?? 0), 0) ?? 0;
+}
+
+function getMistakeCandidates(input: AnalyzeInput) {
+  return input.paperVisionContexts?.flatMap((context) => context.mistakeCandidates ?? []) ?? [];
+}
+
+function isCandidateCovered(candidate: PaperVisionMistakeCandidate, analyses: AnalysisOutput[]) {
+  const candidateTokens = [candidate.questionId, candidate.subQuestionId, candidate.text]
+    .filter((item): item is string => Boolean(item && item.trim()))
+    .map((item) => item.trim());
+
+  return analyses.some((analysis) => {
+    const haystack = [
+      analysis.questionType,
+      analysis.recognizedText,
+      analysis.studentAnswer,
+      analysis.correctAnswer,
+      analysis.mistakeReason,
+      analysis.gradingEvidence?.evidenceSummary,
+      analysis.gradingEvidence?.studentAnswerLocation
+    ].filter(Boolean).join("\n");
+    return candidateTokens.some((token) => haystack.includes(token));
+  });
+}
+
+function getMissingMistakeCandidates(input: AnalyzeInput, analyses: AnalysisOutput[]) {
+  return getMistakeCandidates(input).filter((candidate) => !isCandidateCovered(candidate, analyses));
+}
+
+function inferSubject(input: AnalyzeInput, analyses: AnalysisOutput[]): Subject {
+  if (input.subjectHint && subjects.includes(input.subjectHint as Subject)) {
+    return input.subjectHint as Subject;
+  }
+  return analyses[0]?.subject ?? "数学";
+}
+
+function inferGrade(input: AnalyzeInput, analyses: AnalysisOutput[]): Grade {
+  if (input.gradeHint && grades.includes(input.gradeHint as Grade)) {
+    return input.gradeHint as Grade;
+  }
+  return analyses[0]?.grade ?? "九年级";
+}
+
+function buildCandidateFallbackAnalysis(
+  candidate: PaperVisionMistakeCandidate,
+  input: AnalyzeInput,
+  analyses: AnalysisOutput[]
+): AnalysisOutput {
+  const subject = inferSubject(input, analyses);
+  const grade = inferGrade(input, analyses);
+  const markType = candidate.markTypes.find((item) => item !== "unknown") ?? "unknown";
+  const questionLabel = [candidate.questionId ? `第 ${candidate.questionId} 题` : "未定位题号", candidate.subQuestionId ? `(${candidate.subQuestionId})` : ""].join("");
+  const recognizedText = candidate.text ?? `${questionLabel} OCR 候选题干待复核`;
+
+  return {
+    sourceImageIndex: 0,
+    subject,
+    grade,
+    questionType: `OCR候选${questionLabel}`,
+    recognizedText,
+    studentAnswer: "OCR 检测到批改痕迹，但学生答案需要结合原图人工确认。",
+    correctAnswer: "需要根据题干重新推导并人工复核。",
+    knowledgePoints: [{ name: "待确认知识点", confidence: 0.5 }],
+    mistakeReason: candidate.evidenceSummary,
+    studentFriendlyExplanation: "这道题附近有批改痕迹，先把题干和自己的答案重新抄清楚，再按步骤核对。",
+    example: "先确认题目条件和答案位置，再让老师或 AI 针对清晰题干继续讲解。",
+    archetype: {
+      title: "OCR候选错题复核",
+      pattern: "根据批改痕迹定位疑似错题",
+      solutionTemplate: "看题号和批改标记，复核题干、学生答案、正确解法。",
+      commonTraps: ["只看 OCR 文本，忽略原图批改痕迹", "没有确认学生答案位置"]
+    },
+    practiceQuestions: [
+      {
+        question: "请先重新拍清楚或裁剪这道疑似错题，再完成同类题复习。",
+        answer: "以人工复核后的正确答案为准。",
+        hint: "重点看红笔标记、题号、学生答案三者是否对应。"
+      }
+    ],
+    gradingEvidence: {
+      markType,
+      teacherMarkConfidence: candidate.confidence ?? 0.5,
+      answerMatchConfidence: 0.2,
+      judgement: candidate.judgement === "unknown" ? "suspected" : candidate.judgement,
+      isPartialCredit: candidate.judgement === "partial",
+      needsConfirmation: true,
+      evidenceSummary: candidate.evidenceSummary,
+      studentAnswerLocation: candidate.bbox ? `OCR候选区域 ${formatBox(candidate.bbox)}` : undefined
+    }
+  };
+}
+
+function appendCandidateFallbackAnalyses(input: AnalyzeInput, analyses: AnalysisOutput[]) {
+  const missingCandidates = getMissingMistakeCandidates(input, analyses);
+  if (missingCandidates.length === 0) {
+    return analyses;
+  }
+  return [
+    ...analyses,
+    ...missingCandidates.map((candidate) => buildCandidateFallbackAnalysis(candidate, input, analyses))
+  ];
+}
+
+async function parseWithRepairs(input: {
+  baseUrl: string;
+  apiKey: string;
+  analyzeInput: AnalyzeInput;
+  content: string;
+}) {
+  try {
+    return parseAnalysis(input.content);
+  } catch {
+    const repairedContent = await repairMiniMaxContent({
+      baseUrl: input.baseUrl,
+      apiKey: input.apiKey,
+      analyzeInput: input.analyzeInput,
+      content: input.content
+    });
+    try {
+      return parseAnalysis(repairedContent);
+    } catch {
+      const compactContent = await repairMiniMaxContentCompact({
+        baseUrl: input.baseUrl,
+        apiKey: input.apiKey,
+        analyzeInput: input.analyzeInput,
+        content: repairedContent
+      });
+      return parseAnalysis(compactContent);
+    }
+  }
 }
 
 export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisOutput[]> {
@@ -824,15 +1020,17 @@ export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisO
     content = await analyzeMiniMaxOcrOnly({ baseUrl, apiKey, analyzeInput: input });
   }
 
-  try {
-    return parseAnalysis(content);
-  } catch {
-    const repairedContent = await repairMiniMaxContent({ baseUrl, apiKey, analyzeInput: input, content });
+  const analyses = await parseWithRepairs({ baseUrl, apiKey, analyzeInput: input, content });
+  const candidateCount = getMistakeCandidateCount(input);
+  const missingCandidates = getMissingMistakeCandidates(input, analyses);
+  if (candidateCount > 0 && missingCandidates.length > 0) {
     try {
-      return parseAnalysis(repairedContent);
+      const expandedContent = await expandMiniMaxCoverage({ baseUrl, apiKey, analyzeInput: input, existingAnalyses: analyses });
+      return appendCandidateFallbackAnalyses(input, await parseWithRepairs({ baseUrl, apiKey, analyzeInput: input, content: expandedContent }));
     } catch {
-      const compactContent = await repairMiniMaxContentCompact({ baseUrl, apiKey, analyzeInput: input, content: repairedContent });
-      return parseAnalysis(compactContent);
+      return appendCandidateFallbackAnalyses(input, analyses);
     }
   }
+
+  return analyses;
 }
