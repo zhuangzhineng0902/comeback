@@ -4,8 +4,10 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { NextResponse } from "next/server";
+import { triggerAnalysisWorker } from "@/lib/analysis/jobs";
 import { analyzeMistake } from "@/lib/analyzer";
 import { analyzeWithSimulation } from "@/lib/analyzer/simulated";
+import { prisma } from "@/lib/db";
 import { analyzeImageWithOcr } from "@/lib/ocr/client";
 import { saveAnalysisAsMistake } from "@/lib/repositories/mistakes";
 import { grades, subjects, type AnalysisOutput, type Grade, type PaperVisionContext, type Subject } from "@/lib/types";
@@ -264,6 +266,65 @@ export async function POST(request: Request) {
       analysisImageBase64: analysisBytes.toString("base64"),
       analysisAbsoluteImagePath
     });
+  }
+
+  if (uploadedImages.length > 1) {
+    const batch = await prisma.analysisBatch.create({
+      data: {
+        studentId: "default-student",
+        status: "queued",
+        total: uploadedImages.length,
+        jobs: {
+          create: uploadedImages.map((image, index) => ({
+            studentId: "default-student",
+            imageIndex: index,
+            filename: image.filename,
+            imagePath: image.imagePath,
+            analysisImagePath: image.analysisAbsoluteImagePath
+              ? path.relative(process.cwd(), image.analysisAbsoluteImagePath)
+              : null,
+            analysisMimeType: image.analysisMimeType,
+            subjectHint: subject ?? null,
+            gradeHint: grade ?? null,
+            status: "queued"
+          }))
+        }
+      },
+      include: { jobs: { orderBy: { imageIndex: "asc" } } }
+    });
+
+    triggerAnalysisWorker();
+
+    return NextResponse.json(
+      {
+        mode: "queued",
+        batch: {
+          id: batch.id,
+          status: batch.status,
+          total: batch.total,
+          completed: 0,
+          succeeded: 0,
+          failed: 0,
+          createdAt: batch.createdAt.toISOString(),
+          updatedAt: batch.updatedAt.toISOString()
+        },
+        jobs: batch.jobs.map((job) => ({
+          id: job.id,
+          imageIndex: job.imageIndex,
+          filename: job.filename,
+          status: job.status,
+          retryCount: job.retryCount,
+          image: {
+            index: job.imageIndex,
+            filename: job.filename,
+            url: `/api/uploads/${encodeURIComponent(path.basename(job.imagePath))}`
+          },
+          analyses: [],
+          savedMistakes: []
+        }))
+      },
+      { status: 202 }
+    );
   }
 
   try {

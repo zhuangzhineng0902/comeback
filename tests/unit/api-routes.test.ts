@@ -48,6 +48,17 @@ const prismaMock = {
   },
   tutorMessage: {
     createMany: vi.fn()
+  },
+  analysisBatch: {
+    create: vi.fn(),
+    findFirst: vi.fn(),
+    update: vi.fn()
+  },
+  analysisJob: {
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn()
   }
 };
 
@@ -89,6 +100,14 @@ describe("api routes", () => {
     prismaMock.archetype.findMany.mockReset();
     prismaMock.nonStudyRequestLog.create.mockReset();
     prismaMock.tutorMessage.createMany.mockReset();
+    prismaMock.analysisBatch.create.mockReset();
+    prismaMock.analysisBatch.findFirst.mockReset();
+    prismaMock.analysisBatch.update.mockReset();
+    prismaMock.analysisJob.findMany.mockReset();
+    prismaMock.analysisJob.findUnique.mockReset();
+    prismaMock.analysisJob.update.mockReset();
+    prismaMock.analysisJob.updateMany.mockReset();
+    prismaMock.analysisJob.findMany.mockResolvedValue([]);
   });
 
   afterEach(async () => {
@@ -188,13 +207,30 @@ describe("api routes", () => {
   });
 
   it("analyzes up to sixteen uploaded images without subject or grade hints", async () => {
-    const secondAnalysis = { ...analysis, sourceImageIndex: 1, questionType: "第二道选择题", mistakeReason: "第二题错因" };
-    analyzeMistakeMock
-      .mockResolvedValueOnce({ mode: "api", analysis, analyses: [analysis] })
-      .mockResolvedValueOnce({ mode: "api", analysis: secondAnalysis, analyses: [secondAnalysis] });
-    saveAnalysisAsMistakeMock.mockResolvedValue({
-      mistake: { id: "mistake-1" },
-      gap: { severity: "important" }
+    prismaMock.analysisBatch.create.mockResolvedValue({
+      id: "batch-1",
+      status: "queued",
+      total: 2,
+      createdAt: new Date("2026-07-05T01:00:00.000Z"),
+      updatedAt: new Date("2026-07-05T01:00:00.000Z"),
+      jobs: [
+        {
+          id: "job-1",
+          imageIndex: 0,
+          filename: "page-1.png",
+          imagePath: "uploads/page-1.png",
+          status: "queued",
+          retryCount: 0
+        },
+        {
+          id: "job-2",
+          imageIndex: 1,
+          filename: "page-2.png",
+          imagePath: "uploads/page-2.png",
+          status: "queued",
+          retryCount: 0
+        }
+      ]
     });
     const { POST } = await import("@/app/api/analyze/route");
     const formData = new FormData();
@@ -209,109 +245,117 @@ describe("api routes", () => {
     const response = await POST({ formData: async () => formData } as Request);
 
     const body = await response.json();
+    expect(response.status).toBe(202);
     expect(body).toMatchObject({
-      mode: "api",
-      mistakeId: "mistake-1",
-      analyses: [{ questionType: "选择题" }, { questionType: "第二道选择题" }],
-      uploadedImages: [
-        { index: 0, filename: "page-1.png" },
-        { index: 1, filename: "page-2.png" }
-      ],
-      imageGroups: [
-        {
-          image: { index: 0, filename: "page-1.png" },
-          analyses: [{ questionType: "选择题" }]
-        },
-        {
-          image: { index: 1, filename: "page-2.png" },
-          analyses: [{ questionType: "第二道选择题" }]
-        }
-      ],
-      savedMistakes: [
-        { mistakeId: "mistake-1", gapSeverity: "important" },
-        { mistakeId: "mistake-1", gapSeverity: "important" }
+      mode: "queued",
+      batch: { id: "batch-1", status: "queued", total: 2 },
+      jobs: [
+        { id: "job-1", imageIndex: 0, filename: "page-1.png", status: "queued" },
+        { id: "job-2", imageIndex: 1, filename: "page-2.png", status: "queued" }
       ]
     });
-    expect(body.uploadedImages[0].url).toMatch(/^\/api\/uploads\/[0-9a-f-]+-page-1\.png$/);
-    expect(body.uploadedImages[1].url).toMatch(/^\/api\/uploads\/[0-9a-f-]+-page-2\.png$/);
-    expect(analyzeMistakeMock).toHaveBeenCalledTimes(2);
-    expect(analyzeMistakeMock).toHaveBeenNthCalledWith(1, {
-      filename: "page-1.png",
-      mimeType: "image/png",
-      imageBase64: Buffer.from("image-1").toString("base64"),
-      images: [
-        { filename: "page-1.png", mimeType: "image/png", imageBase64: Buffer.from("image-1").toString("base64") }
-      ],
-      paperVisionContexts: [],
-      subjectHint: undefined,
-      gradeHint: undefined,
-      analysisDetail: "compact"
-    });
-    expect(analyzeMistakeMock).toHaveBeenNthCalledWith(2, {
-      filename: "page-2.png",
-      mimeType: "image/png",
-      imageBase64: Buffer.from("image-2").toString("base64"),
-      images: [
-        { filename: "page-2.png", mimeType: "image/png", imageBase64: Buffer.from("image-2").toString("base64") }
-      ],
-      paperVisionContexts: [],
-      subjectHint: undefined,
-      gradeHint: undefined,
-      analysisDetail: "compact"
-    });
-    expect(saveAnalysisAsMistakeMock).toHaveBeenCalledTimes(2);
-    expect(saveAnalysisAsMistakeMock).toHaveBeenNthCalledWith(
-      1,
+    expect(prismaMock.analysisBatch.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        imagePath: expect.stringMatching(/^uploads\/[0-9a-f-]+-page-1\.png$/),
-        analysis: { ...analysis, sourceImageIndex: 0 }
+        data: expect.objectContaining({
+          studentId: "default-student",
+          status: "queued",
+          total: 2,
+          jobs: expect.objectContaining({
+            create: [
+              expect.objectContaining({ imageIndex: 0, filename: "page-1.png", status: "queued" }),
+              expect.objectContaining({ imageIndex: 1, filename: "page-2.png", status: "queued" })
+            ]
+          })
+        })
       })
     );
-    expect(saveAnalysisAsMistakeMock).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        imagePath: expect.stringMatching(/^uploads\/[0-9a-f-]+-page-2\.png$/),
-        analysis: secondAnalysis
-      })
-    );
+    expect(analyzeMistakeMock).not.toHaveBeenCalled();
+    expect(saveAnalysisAsMistakeMock).not.toHaveBeenCalled();
   });
 
-  it("keeps a multi-image response alive when one page analysis fails", async () => {
-    analyzeMistakeMock
-      .mockResolvedValueOnce({ mode: "api", analysis, analyses: [analysis] })
-      .mockRejectedValueOnce(new Error("MiniMax response was truncated at 16000 completion tokens."));
-    saveAnalysisAsMistakeMock.mockResolvedValue({
-      mistake: { id: "mistake-1" },
-      gap: { severity: "important" }
+  it("returns an analysis batch with succeeded and failed job states", async () => {
+    prismaMock.analysisBatch.findFirst.mockResolvedValue({
+      id: "batch-1",
+      status: "partial",
+      total: 2,
+      createdAt: new Date("2026-07-05T01:00:00.000Z"),
+      updatedAt: new Date("2026-07-05T01:02:00.000Z"),
+      jobs: [
+        {
+          id: "job-1",
+          imageIndex: 0,
+          filename: "page-1.png",
+          imagePath: "uploads/page-1.png",
+          status: "succeeded",
+          retryCount: 0,
+          errorMessage: null,
+          startedAt: new Date("2026-07-05T01:00:01.000Z"),
+          completedAt: new Date("2026-07-05T01:00:20.000Z"),
+          paperVisionContextJson: null,
+          analysesJson: JSON.stringify([analysis]),
+          savedMistakesJson: JSON.stringify([{ mistakeId: "mistake-1", gapSeverity: "important" }])
+        },
+        {
+          id: "job-2",
+          imageIndex: 1,
+          filename: "page-2.png",
+          imagePath: "uploads/page-2.png",
+          status: "failed",
+          retryCount: 1,
+          errorMessage: "MiniMax JSON parse failed",
+          startedAt: new Date("2026-07-05T01:00:01.000Z"),
+          completedAt: new Date("2026-07-05T01:00:20.000Z"),
+          paperVisionContextJson: null,
+          analysesJson: null,
+          savedMistakesJson: null
+        }
+      ]
     });
-    const { POST } = await import("@/app/api/analyze/route");
-    const formData = new FormData();
-    for (let index = 1; index <= 2; index += 1) {
-      const file = new File([`image-${index}`], `page-${index}.png`, { type: "image/png" });
-      Object.defineProperty(file, "arrayBuffer", {
-        value: async () => new TextEncoder().encode(`image-${index}`).buffer
-      });
-      formData.append("files", file);
-    }
+    const { GET } = await import("@/app/api/analysis-batches/[id]/route");
 
-    const response = await POST({ formData: async () => formData } as Request);
+    const response = await GET(new Request("http://localhost/api/analysis-batches/batch-1"), {
+      params: Promise.resolve({ id: "batch-1" })
+    });
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.analyses).toHaveLength(2);
-    expect(body.analyses[0].questionType).toBe("选择题");
-    expect(body.analyses[1]).toMatchObject({
-      sourceImageIndex: 1,
-      subject: "英语",
-      grade: "七年级",
-      questionType: "批量分析待复核页",
-      gradingEvidence: {
-        judgement: "suspected",
-        needsConfirmation: true
+    expect(body.batch).toMatchObject({ id: "batch-1", status: "partial", completed: 2, succeeded: 1, failed: 1 });
+    expect(body.jobs[0]).toMatchObject({ id: "job-1", status: "succeeded", analyses: [{ questionType: "选择题" }] });
+    expect(body.jobs[1]).toMatchObject({ id: "job-2", status: "failed", errorMessage: "MiniMax JSON parse failed" });
+    expect(body.result).toMatchObject({
+      analysis: { questionType: "选择题" },
+      imageGroups: [
+        { status: "succeeded", analyses: [{ questionType: "选择题" }] },
+        { status: "failed", errorMessage: "MiniMax JSON parse failed" }
+      ]
+    });
+  });
+
+  it("retries failed analysis jobs in a batch", async () => {
+    prismaMock.analysisJob.findMany.mockResolvedValue([{ id: "job-2" }]);
+    prismaMock.analysisJob.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.analysisBatch.update.mockResolvedValue({ id: "batch-1" });
+    const { POST } = await import("@/app/api/analysis-batches/[id]/retry/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/analysis-batches/batch-1/retry", {
+        method: "POST",
+        body: JSON.stringify({ jobIds: ["job-2"] })
+      }),
+      { params: Promise.resolve({ id: "batch-1" }) }
+    );
+
+    await expect(response.json()).resolves.toEqual({ retried: 1 });
+    expect(prismaMock.analysisJob.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["job-2"] } },
+      data: {
+        status: "queued",
+        retryCount: { increment: 1 },
+        errorMessage: null,
+        startedAt: null,
+        completedAt: null
       }
     });
-    expect(body.imageGroups[1].analyses[0].questionType).toBe("批量分析待复核页");
-    expect(saveAnalysisAsMistakeMock).toHaveBeenCalledTimes(2);
   });
 
   it("converts HEIC uploads to JPEG before sending images to the analyzer", async () => {

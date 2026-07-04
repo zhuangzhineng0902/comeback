@@ -16,6 +16,8 @@ model Student {
   mistakes            Mistake[]
   knowledgeGaps       KnowledgeGap[]
   nonStudyRequestLogs NonStudyRequestLog[]
+  analysisBatches     AnalysisBatch[]
+  analysisJobs        AnalysisJob[]
 }
 
 model Mistake {
@@ -123,4 +125,46 @@ model NonStudyRequestLog {
   category       String
   createdAt      DateTime @default(now())
   student        Student  @relation(fields: [studentId], references: [id])
+}
+
+model AnalysisBatch {
+  id        String        @id @default(cuid())
+  studentId String
+  status    String        @default("queued")
+  total     Int
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  student   Student       @relation(fields: [studentId], references: [id])
+  jobs      AnalysisJob[]
+
+  @@index([studentId, createdAt])
+}
+
+model AnalysisJob {
+  id                     String        @id @default(cuid())
+  batchId                String
+  studentId              String
+  imageIndex             Int
+  filename               String
+  imagePath              String
+  analysisImagePath      String?
+  analysisMimeType       String
+  subjectHint            String?
+  gradeHint              String?
+  status                 String        @default("queued")
+  retryCount             Int           @default(0)
+  errorMessage           String?
+  paperVisionContextJson String?
+  analysesJson           String?
+  savedMistakesJson      String?
+  startedAt              DateTime?
+  completedAt            DateTime?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  batch                  AnalysisBatch @relation(fields: [batchId], references: [id])
+  student                Student       @relation(fields: [studentId], references: [id])
+
+  @@index([batchId, imageIndex])
+  @@index([status, createdAt])
+  @@index([studentId, createdAt])
 }

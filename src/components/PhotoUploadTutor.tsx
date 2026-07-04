@@ -27,6 +27,40 @@ type AnalyzeResponse = {
   imageGroups?: ImageGroup[];
 };
 
+type AnalysisBatch = {
+  id: string;
+  status: "queued" | "processing" | "partial" | "succeeded" | "failed";
+  total: number;
+  completed: number;
+  succeeded: number;
+  failed: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AnalysisJobView = {
+  id: string;
+  imageIndex: number;
+  filename: string;
+  status: "queued" | "processing" | "succeeded" | "failed";
+  retryCount: number;
+  errorMessage?: string | null;
+  image: UploadedImage;
+  paperVisionContext?: PaperVisionContext;
+  analyses: AnalysisOutput[];
+  savedMistakes: Array<{ mistakeId: string; gapSeverity: GapSeverity }>;
+};
+
+type AnalysisBatchView = {
+  batch: AnalysisBatch;
+  jobs: AnalysisJobView[];
+  result: AnalyzeResponse | null;
+};
+
+type QueuedAnalyzeResponse = Pick<AnalysisBatchView, "batch" | "jobs"> & {
+  mode: "queued";
+};
+
 type UploadedImage = {
   index: number;
   filename: string;
@@ -38,6 +72,9 @@ type ImageGroup = {
   paperVisionContext?: PaperVisionContext;
   analyses: AnalysisOutput[];
   savedMistakes: Array<{ mistakeId: string; gapSeverity: GapSeverity }>;
+  status?: string;
+  errorMessage?: string | null;
+  jobId?: string;
 };
 
 type HistoryEntry = AnalyzeResponse & {
@@ -105,6 +142,7 @@ export function PhotoUploadTutor() {
   const [isChatting, setIsChatting] = useState(false);
   const [previewImage, setPreviewImage] = useState<UploadedImage | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [batchView, setBatchView] = useState<AnalysisBatchView | null>(null);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -121,6 +159,34 @@ export function PhotoUploadTutor() {
   useEffect(() => {
     void loadHistory();
   }, [loadHistory]);
+
+  const loadBatch = useCallback(async (batchId: string) => {
+    const response = await fetch(`/api/analysis-batches/${batchId}`);
+    const data = await readJson(response);
+    if (!response.ok) {
+      throw new Error(typeof data.error === "string" ? data.error : "处理状态查询失败。");
+    }
+    const nextBatchView = data as AnalysisBatchView;
+    setBatchView(nextBatchView);
+    if (nextBatchView.result) {
+      setResult(nextBatchView.result);
+    }
+    if (nextBatchView.batch.status === "succeeded" || nextBatchView.batch.status === "partial" || nextBatchView.batch.status === "failed") {
+      void loadHistory();
+    }
+    return nextBatchView;
+  }, [loadHistory]);
+
+  useEffect(() => {
+    if (!batchView || batchView.batch.status === "succeeded" || batchView.batch.status === "partial" || batchView.batch.status === "failed") {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void loadBatch(batchView.batch.id).catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [batchView, loadBatch]);
 
   async function analyze() {
     if (files.length === 0) {
@@ -149,6 +215,20 @@ export function PhotoUploadTutor() {
 
       if (!response.ok) {
         setError(typeof data.error === "string" ? data.error : "分析失败，请稍后重试。");
+        return;
+      }
+
+      if (response.status === 202 && data.mode === "queued") {
+        const queued = data as QueuedAnalyzeResponse;
+        setBatchView({ batch: queued.batch, jobs: queued.jobs, result: null });
+        setResult(null);
+        setMessages([
+          {
+            role: "assistant",
+            content: `已创建 ${queued.batch.total} 个处理任务。AI 会逐项分析，失败的项目可以批量重试。`
+          }
+        ]);
+        void loadBatch(queued.batch.id).catch(() => undefined);
         return;
       }
 
@@ -205,6 +285,33 @@ export function PhotoUploadTutor() {
             }
           ]
         : [];
+
+  const processingJobs = batchView?.jobs ?? [];
+  const hasFailedJobs = processingJobs.some((job) => job.status === "failed");
+
+  async function retryFailedJobs() {
+    if (!batchView || !hasFailedJobs) {
+      return;
+    }
+    setError("");
+    try {
+      const response = await fetch(`/api/analysis-batches/${batchView.batch.id}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobIds: processingJobs.filter((job) => job.status === "failed").map((job) => job.id)
+        })
+      });
+      const data = await readJson(response);
+      if (!response.ok) {
+        setError(typeof data.error === "string" ? data.error : "重试失败，请稍后再试。");
+        return;
+      }
+      await loadBatch(batchView.batch.id);
+    } catch {
+      setError("网络连接异常，重试请求未发送。");
+    }
+  }
 
   function restoreHistory(entry: HistoryEntry) {
     setResult(entry);
@@ -341,6 +448,68 @@ export function PhotoUploadTutor() {
 
           {error ? <p className="mt-3 text-sm text-rose-600">{error}</p> : null}
         </div>
+
+        {batchView ? (
+          <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-ink">AI 处理列表</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  已完成 {batchView.batch.completed}/{batchView.batch.total}，成功 {batchView.batch.succeeded}，失败 {batchView.batch.failed}
+                </p>
+              </div>
+              {hasFailedJobs ? (
+                <button
+                  type="button"
+                  onClick={retryFailedJobs}
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-sky-300 hover:text-sky-700"
+                >
+                  批量重试失败项
+                </button>
+              ) : null}
+            </div>
+            <div className="mt-4 grid gap-2">
+              {processingJobs.map((job) => {
+                const statusText =
+                  job.status === "queued"
+                    ? "排队中"
+                    : job.status === "processing"
+                      ? "AI 处理中"
+                      : job.status === "succeeded"
+                        ? "AI 处理成功"
+                        : "AI 处理失败";
+                const statusClassName =
+                  job.status === "succeeded"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : job.status === "failed"
+                      ? "border-rose-200 bg-rose-50 text-rose-700"
+                      : "border-sky-200 bg-sky-50 text-sky-800";
+
+                return (
+                  <div key={job.id} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-ink">
+                          第 {job.imageIndex + 1} 张 · {job.filename}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          已识别错题 {job.analyses.length} 道
+                          {job.retryCount > 0 ? ` · 已重试 ${job.retryCount} 次` : ""}
+                        </p>
+                      </div>
+                      <span className={`rounded-md border px-2 py-1 text-xs font-medium ${statusClassName}`}>
+                        {statusText}
+                      </span>
+                    </div>
+                    {job.errorMessage ? (
+                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-rose-700">{job.errorMessage}</p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
 
         {result ? (
           <div className="space-y-4">
