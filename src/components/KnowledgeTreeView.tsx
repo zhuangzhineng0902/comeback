@@ -1,3 +1,4 @@
+import Link from "next/link";
 import React from "react";
 
 import { SeverityBadge } from "@/components/SeverityBadge";
@@ -17,7 +18,9 @@ function NodeView({ node, depth = 0 }: { node: TreeNode; depth?: number }) {
     <li className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3" style={{ paddingLeft: depth * 14 }}>
         <div>
-          <p className="font-medium text-ink">{node.name}</p>
+          <Link href={`/knowledge-points/${node.id}`} className="font-medium text-ink hover:text-sky-700">
+            {node.name}
+          </Link>
           <p className="mt-1 text-xs text-slate-500">
             {node.chapter} · 错误 {node.errorCount} 次 · 高频母题 {node.repeatedArchetypeCount} 次
           </p>

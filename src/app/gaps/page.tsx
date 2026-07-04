@@ -1,3 +1,4 @@
+import Link from "next/link";
 import React from "react";
 
 import { SeverityBadge } from "@/components/SeverityBadge";
@@ -30,13 +31,23 @@ export default async function GapsPage() {
                   <p className="text-xs text-slate-500">
                     {gap.knowledgePoint.grade} · {gap.knowledgePoint.subject}
                   </p>
-                  <h2 className="mt-1 font-semibold text-ink">{gap.knowledgePoint.name}</h2>
+                  <h2 className="mt-1 font-semibold text-ink">
+                    <Link href={`/knowledge-points/${gap.knowledgePoint.id}`} className="hover:text-sky-700">
+                      {gap.knowledgePoint.name}
+                    </Link>
+                  </h2>
                 </div>
                 <SeverityBadge severity={gap.severity} />
               </div>
               <p className="mt-3 text-sm leading-6 text-slate-600">
                 错误 {gap.errorCount} 次，高频母题 {gap.repeatedArchetypeCount} 次。{gap.reviewSuggestion}
               </p>
+              <Link
+                href={`/knowledge-points/${gap.knowledgePoint.id}`}
+                className="mt-3 inline-flex rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:border-sky-300 hover:text-sky-700"
+              >
+                查看知识点详情
+              </Link>
             </article>
           ))
         )}

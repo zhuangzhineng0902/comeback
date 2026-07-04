@@ -33,9 +33,14 @@ const prismaMock = {
     findUnique: vi.fn()
   },
   knowledgeGap: {
+    findFirst: vi.fn(),
     findMany: vi.fn()
   },
   knowledgePoint: {
+    findFirst: vi.fn(),
+    findMany: vi.fn()
+  },
+  archetype: {
     findMany: vi.fn()
   },
   nonStudyRequestLog: {
@@ -77,8 +82,11 @@ describe("api routes", () => {
     prismaMock.mistake.findFirst.mockReset();
     prismaMock.mistake.findMany.mockReset();
     prismaMock.mistake.findUnique.mockReset();
+    prismaMock.knowledgeGap.findFirst.mockReset();
     prismaMock.knowledgeGap.findMany.mockReset();
+    prismaMock.knowledgePoint.findFirst.mockReset();
     prismaMock.knowledgePoint.findMany.mockReset();
+    prismaMock.archetype.findMany.mockReset();
     prismaMock.nonStudyRequestLog.create.mockReset();
     prismaMock.tutorMessage.createMany.mockReset();
   });
@@ -669,6 +677,84 @@ describe("api routes", () => {
       where: {
         studentId: "default-student",
         knowledgePoint: { grade: "八年级", subject: "数学" }
+      }
+    });
+  });
+
+  it("returns a knowledge point drill-down detail with examples and related mistakes", async () => {
+    prismaMock.knowledgePoint.findFirst.mockResolvedValue({
+      id: "point-1",
+      subject: "数学",
+      grade: "八年级",
+      name: "一次函数图像与性质",
+      chapter: "函数",
+      parentId: null,
+      parent: null,
+      children: [{ id: "point-child", name: "一次函数与坐标轴交点", chapter: "函数", sortOrder: 2 }]
+    });
+    prismaMock.knowledgeGap.findFirst.mockResolvedValue({
+      id: "gap-1",
+      knowledgePointId: "point-1",
+      severity: "repeated_archetype",
+      errorCount: 3,
+      repeatedArchetypeCount: 2,
+      reviewSuggestion: "优先复习图像与 k、b 的关系。",
+      typicalReasons: "[\"把 k 和 b 混淆\"]"
+    });
+    prismaMock.archetype.findMany.mockResolvedValue([
+      {
+        id: "arch-1",
+        title: "一次函数图像性质判断母题",
+        pattern: "判断一次函数图像",
+        solutionTemplate: "先看 k 决定升降，再看 b 决定与 y 轴交点。",
+        commonTraps: "[\"只看截距\", \"忽略斜率正负\"]",
+        mistakeArchetypes: [
+          {
+            mistake: {
+              id: "mistake-1",
+              subject: "数学",
+              grade: "八年级",
+              questionType: "选择题",
+              recognizedText: "一次函数 y=-2x+3 的图像经过哪些象限？",
+              studentAnswer: "一二三",
+              correctAnswer: "一二四",
+              explanation: "k<0 图像下降，b>0 过 y 轴正半轴。",
+              mistakeReason: "忽略斜率为负。",
+              masteryStatus: "new",
+              createdAt: new Date("2026-07-01T08:00:00.000Z")
+            }
+          }
+        ]
+      }
+    ]);
+    const { GET } = await import("@/app/api/knowledge-points/[id]/route");
+
+    const response = await GET(new Request("http://localhost/api/knowledge-points/point-1"), {
+      params: Promise.resolve({ id: "point-1" })
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      detail: {
+        knowledgePoint: { id: "point-1", name: "一次函数图像与性质" },
+        gap: { severity: "repeated_archetype", errorCount: 3 },
+        richExplanation: {
+          diagnosis: expect.stringContaining("一次函数图像与性质"),
+          illustration: { type: "treePath" },
+          shenzhenExample: {
+            label: "深圳题型风格",
+            question: expect.stringContaining("一次函数")
+          }
+        },
+        archetypes: [{ title: "一次函数图像性质判断母题" }],
+        relatedMistakes: [{ id: "mistake-1", correctAnswer: "一二四" }]
+      }
+    });
+    expect(prismaMock.knowledgePoint.findFirst).toHaveBeenCalledWith({
+      where: { id: "point-1" },
+      include: {
+        parent: true,
+        children: { orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }
       }
     });
   });
