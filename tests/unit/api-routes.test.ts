@@ -1,4 +1,5 @@
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,6 +27,7 @@ const analyzeMistakeMock = vi.fn();
 const saveAnalysisAsMistakeMock = vi.fn();
 const analyzeImageWithOcrMock = vi.fn();
 const execFileMock = vi.hoisted(() => vi.fn());
+const testUploadRoots: string[] = [];
 const prismaMock = {
   mistake: {
     findFirst: vi.fn(),
@@ -84,7 +86,10 @@ vi.mock("node:child_process", () => ({
 }));
 
 describe("api routes", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    const uploadRoot = await mkdtemp(path.join(tmpdir(), "private-tutor-route-uploads-"));
+    testUploadRoots.push(uploadRoot);
+    process.env.UPLOAD_ROOT_DIR = uploadRoot;
     delete process.env.ENABLE_AI_FALLBACK;
     analyzeMistakeMock.mockReset();
     saveAnalysisAsMistakeMock.mockReset();
@@ -112,8 +117,8 @@ describe("api routes", () => {
 
   afterEach(async () => {
     delete process.env.ENABLE_AI_FALLBACK;
-    await rm(path.join(process.cwd(), "uploads"), { recursive: true, force: true });
-    await mkdir(path.join(process.cwd(), "uploads"), { recursive: true });
+    delete process.env.UPLOAD_ROOT_DIR;
+    await Promise.all(testUploadRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
   });
 
   it("analyzes an uploaded mistake and saves the result", async () => {
@@ -156,6 +161,32 @@ describe("api routes", () => {
         analysis
       })
     );
+  });
+
+  it("stores uploaded files under the configured upload root", async () => {
+    const uploadRoot = await mkdtemp(path.join(tmpdir(), "private-tutor-uploads-"));
+    testUploadRoots.push(uploadRoot);
+    process.env.UPLOAD_ROOT_DIR = uploadRoot;
+    analyzeMistakeMock.mockResolvedValue({ mode: "simulation", analysis });
+    saveAnalysisAsMistakeMock.mockResolvedValue({
+      mistake: { id: "mistake-1" },
+      gap: { severity: "normal" }
+    });
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    const file = new File(["image-bytes"], "paper.png", { type: "image/png" });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: async () => new TextEncoder().encode("image-bytes").buffer
+    });
+    formData.set("file", file);
+
+    const response = await POST({ formData: async () => formData } as Request);
+    const body = await response.json();
+    const savedFilename = path.basename(body.uploadedImages[0].url);
+
+    expect(response.status).toBe(200);
+    await expect(stat(path.join(uploadRoot, savedFilename))).resolves.toMatchObject({ isFile: expect.any(Function) });
+    await expect(stat(path.join(process.cwd(), "uploads", savedFilename))).rejects.toThrow();
   });
 
   it("runs OCR before AI analysis and returns paper vision context", async () => {
@@ -471,7 +502,7 @@ describe("api routes", () => {
     formData.set("file", file);
 
     const response = await POST({ formData: async () => formData } as Request);
-    const files = await readdir(path.join(process.cwd(), "uploads"));
+    const files = await readdir(process.env.UPLOAD_ROOT_DIR as string);
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({ error: "分析失败，请稍后重试。" });
@@ -489,7 +520,7 @@ describe("api routes", () => {
     formData.set("file", file);
 
     const response = await POST({ formData: async () => formData } as Request);
-    const files = await readdir(path.join(process.cwd(), "uploads"));
+    const files = await readdir(process.env.UPLOAD_ROOT_DIR as string);
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({ error: "真实 AI 分析失败，请稍后重试。" });

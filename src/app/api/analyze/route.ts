@@ -11,6 +11,7 @@ import { prisma } from "@/lib/db";
 import { analyzeImageWithOcr } from "@/lib/ocr/client";
 import { saveAnalysisAsMistake } from "@/lib/repositories/mistakes";
 import { grades, subjects, type AnalysisOutput, type Grade, type PaperVisionContext, type Subject } from "@/lib/types";
+import { getUploadRootDir, storedUploadPath, uploadFilePath } from "@/lib/uploads";
 
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 const maxUploadBytes = 8 * 1024 * 1024;
@@ -220,15 +221,15 @@ export async function POST(request: Request) {
   const subject = subjects.includes(subjectHint as Subject) ? (subjectHint as Subject) : undefined;
   const grade = grades.includes(gradeHint as Grade) ? (gradeHint as Grade) : undefined;
 
-  const uploadDir = path.join(process.cwd(), "uploads");
+  const uploadDir = getUploadRootDir();
   await mkdir(uploadDir, { recursive: true });
   const uploadedImages: UploadedImage[] = [];
 
   for (const file of files) {
     const bytes = Buffer.from(await file.arrayBuffer());
     const safeName = `${randomUUID()}-${file.name.replace(/[^a-zA-Z0-9_.-]/g, "_")}`;
-    const imagePath = path.join("uploads", safeName);
-    const absoluteImagePath = path.join(process.cwd(), imagePath);
+    const imagePath = storedUploadPath(safeName);
+    const absoluteImagePath = uploadFilePath(safeName);
     await writeFile(absoluteImagePath, bytes);
     const needsConversion = file.type === "image/heic" || file.type === "image/heif";
     const shouldCreateAnalysisImage = needsConversion || process.env.NODE_ENV !== "test";
@@ -281,7 +282,7 @@ export async function POST(request: Request) {
             filename: image.filename,
             imagePath: image.imagePath,
             analysisImagePath: image.analysisAbsoluteImagePath
-              ? path.relative(process.cwd(), image.analysisAbsoluteImagePath)
+              ? storedUploadPath(path.basename(image.analysisAbsoluteImagePath))
               : null,
             analysisMimeType: image.analysisMimeType,
             subjectHint: subject ?? null,

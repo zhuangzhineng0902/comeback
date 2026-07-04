@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { uploadFilePath } from "@/lib/uploads";
 
 const mimeTypes: Record<string, string> = {
   ".jpg": "image/jpeg",
@@ -14,7 +15,7 @@ const mimeTypes: Record<string, string> = {
 export async function GET(_request: Request, context: { params: Promise<{ filename: string }> }) {
   const { filename } = await context.params;
   const safeName = path.basename(decodeURIComponent(filename));
-  const uploadPath = path.join(process.cwd(), "uploads", safeName);
+  const uploadPath = uploadFilePath(safeName);
 
   try {
     const bytes = await readFile(uploadPath);

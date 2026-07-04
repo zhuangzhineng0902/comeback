@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { analyzeImageWithOcr } from "@/lib/ocr/client";
 import { saveAnalysisAsMistake } from "@/lib/repositories/mistakes";
 import type { AnalysisOutput, GapSeverity, Grade, PaperVisionContext, Subject } from "@/lib/types";
+import { resolveStoredUploadPath } from "@/lib/uploads";
 
 const STUDENT_ID = "default-student";
 const maxWorkerConcurrency = 4;
@@ -144,7 +145,7 @@ async function processJob(jobId: string) {
     });
 
     const imagePath = job.analysisImagePath ?? job.imagePath;
-    const imageBase64 = (await readFile(path.join(process.cwd(), imagePath))).toString("base64");
+    const imageBase64 = (await readFile(resolveStoredUploadPath(imagePath))).toString("base64");
     const paperVisionContext = await analyzeImageWithOcr({
       filename: job.filename,
       mimeType: job.analysisMimeType,
