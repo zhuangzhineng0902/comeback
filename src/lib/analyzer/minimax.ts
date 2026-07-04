@@ -956,22 +956,30 @@ async function parseWithRepairs(input: {
   try {
     return parseAnalysis(input.content);
   } catch {
-    const repairedContent = await repairMiniMaxContent({
-      baseUrl: input.baseUrl,
-      apiKey: input.apiKey,
-      analyzeInput: input.analyzeInput,
-      content: input.content
-    });
     try {
-      return parseAnalysis(repairedContent);
-    } catch {
-      const compactContent = await repairMiniMaxContentCompact({
+      const repairedContent = await repairMiniMaxContent({
         baseUrl: input.baseUrl,
         apiKey: input.apiKey,
         analyzeInput: input.analyzeInput,
-        content: repairedContent
+        content: input.content
       });
-      return parseAnalysis(compactContent);
+      try {
+        return parseAnalysis(repairedContent);
+      } catch {
+        const compactContent = await repairMiniMaxContentCompact({
+          baseUrl: input.baseUrl,
+          apiKey: input.apiKey,
+          analyzeInput: input.analyzeInput,
+          content: repairedContent
+        });
+        return parseAnalysis(compactContent);
+      }
+    } catch (repairError) {
+      if (getMistakeCandidateCount(input.analyzeInput) > 0) {
+        return appendCandidateFallbackAnalyses(input.analyzeInput, []);
+      }
+
+      throw repairError;
     }
   }
 }

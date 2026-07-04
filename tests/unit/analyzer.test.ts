@@ -1176,6 +1176,58 @@ describe("simulated analyzer", () => {
     expect(result.analyses.at(-1)?.gradingEvidence?.needsConfirmation).toBe(true);
   });
 
+  it("keeps OCR mistake candidates when JSON repair times out", async () => {
+    process.env.MINIMAX_API_KEY = "test-minimax-key";
+    const timeoutError = new Error("The operation was aborted due to timeout");
+    timeoutError.name = "TimeoutError";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "<think>识别到了错题，但没有输出 JSON。</think>" } }]
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockRejectedValueOnce(timeoutError);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeMistake({
+      filename: "paper.png",
+      mimeType: "image/png",
+      imageBase64: "image-bytes",
+      paperVisionContexts: [
+        {
+          sourceImageIndex: 0,
+          engine: "ocr",
+          status: "available",
+          summary: "识别 1 个错题候选",
+          textBlocks: [{ text: "14. (2) 4x² - 36 = 0", bbox: [10, 20, 300, 60] }],
+          questionCandidates: [{ questionId: "14", text: "4x² - 36 = 0", bbox: [10, 20, 300, 60] }],
+          mistakeCandidates: [
+            {
+              questionId: "14",
+              subQuestionId: "2",
+              text: "4x² - 36 = 0",
+              bbox: [10, 20, 360, 80],
+              confidence: 0.8,
+              markTypes: ["cross"],
+              judgement: "wrong",
+              evidenceSummary: "第 14 题第 (2) 小题旁有红叉。"
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.mode).toBe("api");
+    expect(result.analyses).toHaveLength(1);
+    expect(result.analysis.questionType).toContain("OCR候选第 14 题");
+    expect(result.analysis.gradingEvidence?.needsConfirmation).toBe(true);
+  });
+
   it("repairs rich explanations with malformed illustration types instead of dropping them", async () => {
     process.env.MINIMAX_API_KEY = "test-minimax-key";
     const fetchMock = vi
