@@ -4,7 +4,6 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
-import type { AnalysisOutput } from "@/lib/types";
 import { resolveStoredUploadPath } from "@/lib/uploads";
 
 const STUDENT_ID = "default-student";
@@ -79,6 +78,7 @@ export async function GET() {
         questionType: true,
         needsManualReview: true,
         reviewStatus: true,
+        reviewedAt: true,
         createdAt: true,
         updatedAt: true
       },
@@ -86,14 +86,29 @@ export async function GET() {
     })
   ]);
 
+  const mistakesById = new Map(mistakes.map((mistake) => [mistake.id, mistake]));
+  const mistakesByImagePath = new Map<string, typeof mistakes>();
+  for (const mistake of mistakes) {
+    const group = mistakesByImagePath.get(mistake.imagePath) ?? [];
+    group.push(mistake);
+    mistakesByImagePath.set(mistake.imagePath, group);
+  }
+  const pendingReviewCount = (items: typeof mistakes) =>
+    items.filter((mistake) => mistake.needsManualReview || mistake.reviewStatus === "pending").length;
+
   const jobImagePaths = new Set(jobs.map((job) => job.imagePath));
   const jobUploads = jobs.map((job) => {
-    const analyses = parseJsonArray<AnalysisOutput>(job.analysesJson);
     const savedMistakes = parseJsonArray<{ mistakeId: string }>(job.savedMistakesJson);
-    const needsReviewCount = analyses.filter((analysis) => analysis.gradingEvidence?.needsConfirmation).length;
+    const savedMistakeRecords = savedMistakes
+      .map((saved) => mistakesById.get(saved.mistakeId))
+      .filter((mistake): mistake is (typeof mistakes)[number] => Boolean(mistake));
+    const relatedMistakes = savedMistakeRecords.length > 0
+      ? savedMistakeRecords
+      : mistakesByImagePath.get(job.imagePath) ?? [];
+    const needsReviewCount = pendingReviewCount(relatedMistakes);
     const status = jobStatus({
       status: job.status,
-      analysesCount: analyses.length,
+      analysesCount: relatedMistakes.length,
       savedCount: savedMistakes.length,
       needsReviewCount,
       retryCount: job.retryCount
@@ -123,20 +138,15 @@ export async function GET() {
   });
 
   const mistakeGroups = new Map<string, typeof mistakes>();
-  for (const mistake of mistakes) {
-    if (jobImagePaths.has(mistake.imagePath)) {
+  for (const [mistakeImagePath, group] of mistakesByImagePath) {
+    if (jobImagePaths.has(mistakeImagePath)) {
       continue;
     }
-
-    const group = mistakeGroups.get(mistake.imagePath) ?? [];
-    group.push(mistake);
-    mistakeGroups.set(mistake.imagePath, group);
+    mistakeGroups.set(mistakeImagePath, group);
   }
 
   const singleUploads = Array.from(mistakeGroups.entries()).map(([mistakeImagePath, group]) => {
-    const needsReviewCount = group.filter(
-      (mistake) => mistake.needsManualReview || mistake.reviewStatus === "pending"
-    ).length;
+    const needsReviewCount = pendingReviewCount(group);
     const first = group[0];
     const latest = group.reduce((current, item) => (item.updatedAt > current.updatedAt ? item : current), first);
 
@@ -169,6 +179,12 @@ export async function GET() {
   const uploadsWithKeys = await Promise.all(
     uploads.map(async (upload) => ({ ...upload, dedupKey: await imageDedupKey(upload.imagePath) }))
   );
+  const manuallyReviewedImages = new Set<string>();
+  for (const [mistakeImagePath, group] of mistakesByImagePath) {
+    if (group.some((mistake) => mistake.reviewStatus === "confirmed_wrong" || mistake.reviewStatus === "not_wrong")) {
+      manuallyReviewedImages.add(await imageDedupKey(mistakeImagePath));
+    }
+  }
   const latestByImage = new Map<string, (typeof uploadsWithKeys)[number]>();
   const rerunningImages = new Set<string>();
 
@@ -185,6 +201,19 @@ export async function GET() {
 
   const syncedUploads = uploadsWithKeys.map((upload) => {
     const latest = latestByImage.get(upload.dedupKey);
+    if (manuallyReviewedImages.has(upload.dedupKey)) {
+      const reviewedLatest = latest ?? upload;
+      return {
+        ...upload,
+        status: "succeeded",
+        statusLabel: "已解析",
+        parsedMistakeCount: reviewedLatest.parsedMistakeCount,
+        needsReviewCount: 0,
+        errorMessage: null,
+        canRetry: true
+      };
+    }
+
     if (rerunningImages.has(upload.dedupKey)) {
       return {
         ...upload,
