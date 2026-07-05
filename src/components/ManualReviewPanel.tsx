@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, RefreshCw, XCircle } from "lucide-react";
+import { CheckCircle2, RefreshCw, X, XCircle } from "lucide-react";
 import React, { useEffect, useState } from "react";
 
 type ReviewMistake = {
@@ -39,6 +39,7 @@ export function ManualReviewPanel() {
   const [isLoading, setIsLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState("");
   const [error, setError] = useState("");
+  const [viewingImage, setViewingImage] = useState<{ url: string; alt: string } | null>(null);
 
   async function loadMistakes() {
     setIsLoading(true);
@@ -124,9 +125,19 @@ export function ManualReviewPanel() {
           <article key={mistake.id} className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="grid min-w-0 gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
               <div className="min-w-0">
-                <div className="overflow-hidden rounded-md border border-slate-200 bg-slate-50">
-                  <img src={mistake.imageUrl} alt={`${mistake.questionType} 原图`} className="h-auto max-h-72 w-full object-contain" />
-                </div>
+                <button
+                  type="button"
+                  aria-label={`查看 ${mistake.questionType} 原图`}
+                  onClick={() => setViewingImage({ url: mistake.imageUrl, alt: `${mistake.questionType} 原图` })}
+                  className="group block w-full overflow-hidden rounded-md border border-slate-200 bg-slate-50 text-left transition hover:border-slate-400"
+                >
+                  <img
+                    src={mistake.imageUrl}
+                    alt={`${mistake.questionType} 原图`}
+                    className="h-auto max-h-72 w-full object-contain"
+                  />
+                </button>
+                <p className="mt-2 text-xs text-slate-500">点击图片查看原图</p>
               </div>
 
               <div className="min-w-0">
@@ -183,6 +194,36 @@ export function ManualReviewPanel() {
           </article>
         ))}
       </div>
+
+      {viewingImage ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={viewingImage.alt}
+          className="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 p-4"
+          onClick={() => setViewingImage(null)}
+        >
+          <div
+            className="max-h-full w-full max-w-5xl overflow-hidden rounded-lg bg-white shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <p className="truncate text-sm font-medium text-ink">{viewingImage.alt}</p>
+              <button
+                type="button"
+                aria-label="关闭原图"
+                onClick={() => setViewingImage(null)}
+                className="grid h-9 w-9 place-items-center rounded-md text-slate-600 transition hover:bg-slate-100 hover:text-ink"
+              >
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="max-h-[calc(100vh-120px)] overflow-auto bg-slate-100 p-3">
+              <img src={viewingImage.url} alt={viewingImage.alt} className="mx-auto h-auto max-w-full rounded-md bg-white" />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
