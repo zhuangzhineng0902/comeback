@@ -2,6 +2,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { activeMistakeWhere } from "@/lib/review-status";
 import type { AnalysisOutput } from "@/lib/types";
 
 function parseCommonTraps(value?: string) {
@@ -36,7 +37,7 @@ function imageSummary(imagePath: string) {
 
 export async function GET() {
   const mistakes = await prisma.mistake.findMany({
-    where: { studentId: "default-student" },
+    where: activeMistakeWhere({ studentId: "default-student" }),
     include: {
       tutorMessages: { orderBy: { createdAt: "asc" } },
       mistakeArchetypes: { include: { archetype: true } }

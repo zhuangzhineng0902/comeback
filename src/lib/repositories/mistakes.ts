@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { calculateGapSeverity, getGapSeverityRank } from "@/lib/knowledge/severity";
+import { activeMistakeReviewWhere } from "@/lib/review-status";
 import type { AnalysisOutput } from "@/lib/types";
 
 export type SaveAnalysisInput = {
@@ -38,7 +39,7 @@ async function recalculateKnowledgeGap(tx: Prisma.TransactionClient, input: {
 }) {
   const activeMistakeWhere = {
     studentId: input.studentId,
-    reviewStatus: { not: "not_wrong" },
+    ...activeMistakeReviewWhere,
     mistakeArchetypes: {
       some: {
         archetype: {
@@ -230,6 +231,15 @@ export async function saveAnalysisAsMistake(input: SaveAnalysisInput) {
         tutorMessages: true
       }
     });
+
+    if (reviewState.reviewStatus === "pending") {
+      return {
+        mistake,
+        gap: { severity: "normal" },
+        knowledgePoint,
+        archetype
+      };
+    }
 
     const gap = await recalculateKnowledgeGap(tx, {
       studentId: input.studentId,

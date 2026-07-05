@@ -64,6 +64,34 @@ const prismaMock = {
   }
 };
 
+const activeReviewWhere = {
+  OR: [
+    { needsManualReview: false, reviewStatus: { not: "not_wrong" } },
+    { reviewStatus: "confirmed_wrong" }
+  ],
+  NOT: [
+    { questionType: { contains: "OCR" } },
+    { questionType: { contains: "复核" } },
+    { correctAnswer: { contains: "人工复核" } },
+    { correctAnswer: { contains: "重新推导" } },
+    { mistakeReason: { contains: "复核" } },
+    {
+      mistakeArchetypes: {
+        some: {
+          archetype: {
+            OR: [
+              { title: { contains: "OCR" } },
+              { title: { contains: "复核" } },
+              { pattern: { contains: "复核" } },
+              { solutionTemplate: { contains: "复核" } }
+            ]
+          }
+        }
+      }
+    }
+  ]
+};
+
 vi.mock("@/lib/analyzer", () => ({
   analyzeMistake: analyzeMistakeMock
 }));
@@ -573,7 +601,7 @@ describe("api routes", () => {
     expect(body.blocked).toBe(false);
     expect(body.reply).toContain("这道数学题怎么做？");
     expect(prismaMock.mistake.findFirst).toHaveBeenCalledWith({
-      where: { id: "mistake-1", studentId: "default-student" }
+      where: { id: "mistake-1", studentId: "default-student", ...activeReviewWhere }
     });
     expect(prismaMock.tutorMessage.createMany).toHaveBeenCalledWith({
       data: [
@@ -597,7 +625,7 @@ describe("api routes", () => {
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: "错题不存在。" });
     expect(prismaMock.mistake.findFirst).toHaveBeenCalledWith({
-      where: { id: "missing-mistake", studentId: "default-student" }
+      where: { id: "missing-mistake", studentId: "default-student", ...activeReviewWhere }
     });
     expect(prismaMock.tutorMessage.createMany).not.toHaveBeenCalled();
   });
@@ -679,14 +707,14 @@ describe("api routes", () => {
 
     expect(await response.json()).toEqual({ mistakes: [{ id: "mistake-1" }] });
     expect(prismaMock.mistake.findMany).toHaveBeenCalledWith({
-      where: { studentId: "default-student", subject: "数学", grade: "八年级" },
+      where: { studentId: "default-student", subject: "数学", grade: "八年级", ...activeReviewWhere },
       include: { mistakeArchetypes: { include: { archetype: true } } },
       orderBy: { createdAt: "desc" }
     });
   });
 
   it("returns a mistake detail by awaited route params", async () => {
-    prismaMock.mistake.findUnique.mockResolvedValue({ id: "mistake-1" });
+    prismaMock.mistake.findFirst.mockResolvedValue({ id: "mistake-1" });
     const { GET } = await import("@/app/api/mistakes/[id]/route");
 
     const response = await GET(new Request("http://localhost/api/mistakes/mistake-1"), {
@@ -694,8 +722,8 @@ describe("api routes", () => {
     });
 
     expect(await response.json()).toEqual({ mistake: { id: "mistake-1" } });
-    expect(prismaMock.mistake.findUnique).toHaveBeenCalledWith({
-      where: { id: "mistake-1" },
+    expect(prismaMock.mistake.findFirst).toHaveBeenCalledWith({
+      where: { id: "mistake-1", studentId: "default-student", ...activeReviewWhere },
       include: {
         tutorMessages: { orderBy: { createdAt: "asc" } },
         mistakeArchetypes: { include: { archetype: true } }
@@ -758,7 +786,7 @@ describe("api routes", () => {
       ]
     });
     expect(prismaMock.mistake.findMany).toHaveBeenCalledWith({
-      where: { studentId: "default-student" },
+      where: { studentId: "default-student", ...activeReviewWhere },
       include: {
         tutorMessages: { orderBy: { createdAt: "asc" } },
         mistakeArchetypes: { include: { archetype: true } }
@@ -776,7 +804,20 @@ describe("api routes", () => {
 
     expect(await response.json()).toEqual({ gaps: [{ id: "gap-1" }] });
     expect(prismaMock.knowledgeGap.findMany).toHaveBeenCalledWith({
-      where: { studentId: "default-student" },
+      where: {
+        studentId: "default-student",
+        knowledgePoint: {
+          archetypes: {
+            some: {
+              mistakeArchetypes: {
+                some: {
+                  mistake: { studentId: "default-student", ...activeReviewWhere }
+                }
+              }
+            }
+          }
+        }
+      },
       include: { knowledgePoint: true },
       orderBy: [{ severityRank: "desc" }, { lastOccurredAt: "desc" }]
     });
@@ -805,7 +846,19 @@ describe("api routes", () => {
     expect(prismaMock.knowledgeGap.findMany).toHaveBeenCalledWith({
       where: {
         studentId: "default-student",
-        knowledgePoint: { grade: "八年级", subject: "数学" }
+        knowledgePoint: {
+          grade: "八年级",
+          subject: "数学",
+          archetypes: {
+            some: {
+              mistakeArchetypes: {
+                some: {
+                  mistake: { studentId: "default-student", ...activeReviewWhere }
+                }
+              }
+            }
+          }
+        }
       }
     });
   });

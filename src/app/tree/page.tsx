@@ -4,6 +4,7 @@ import React from "react";
 import { KnowledgeTreeView } from "@/components/KnowledgeTreeView";
 import { prisma } from "@/lib/db";
 import { buildKnowledgeTree } from "@/lib/knowledge/tree";
+import { activeMistakeWhere } from "@/lib/review-status";
 import { grades, subjects, type Grade, type Subject } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +35,22 @@ export default async function TreePage({
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }]
   });
   const gaps = await prisma.knowledgeGap.findMany({
-    where: { studentId: "default-student", knowledgePoint: { grade, subject } }
+    where: {
+      studentId: "default-student",
+      knowledgePoint: {
+        grade,
+        subject,
+        archetypes: {
+          some: {
+            mistakeArchetypes: {
+              some: {
+                mistake: activeMistakeWhere({ studentId: "default-student" })
+              }
+            }
+          }
+        }
+      }
+    }
   });
   const tree = buildKnowledgeTree({ points, gaps });
 

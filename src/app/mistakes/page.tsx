@@ -2,12 +2,13 @@ import React from "react";
 
 import { MistakeList } from "@/components/MistakeList";
 import { prisma } from "@/lib/db";
+import { activeMistakeWhere } from "@/lib/review-status";
 
 export const dynamic = "force-dynamic";
 
 export default async function MistakesPage() {
   const mistakes = await prisma.mistake.findMany({
-    where: { studentId: "default-student" },
+    where: activeMistakeWhere({ studentId: "default-student" }),
     orderBy: { createdAt: "desc" }
   });
 

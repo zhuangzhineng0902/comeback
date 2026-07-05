@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { activeMistakeWhere } from "@/lib/review-status";
 import type { GapSeverity, RichExplanation } from "@/lib/types";
 
 const STUDENT_ID = "default-student";
@@ -194,7 +195,7 @@ export async function getKnowledgePointDetail(id: string): Promise<KnowledgePoin
       where: { knowledgePointId: id },
       include: {
         mistakeArchetypes: {
-          where: { mistake: { studentId: STUDENT_ID } },
+          where: { mistake: activeMistakeWhere({ studentId: STUDENT_ID }) },
           include: { mistake: true },
           orderBy: { createdAt: "desc" }
         }
@@ -210,17 +211,19 @@ export async function getKnowledgePointDetail(id: string): Promise<KnowledgePoin
     }
   }
   const relatedMistakes = [...relatedMistakesById.values()].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const visibleArchetypes = (archetypes as ArchetypeRecord[]).filter((archetype) => archetype.mistakeArchetypes.length > 0);
+  const visibleGap = relatedMistakes.length > 0 ? gap : null;
 
   return {
     knowledgePoint: point as KnowledgePointRecord,
-    gap: gap ? ({ ...gap, severity: normalizeSeverity(gap.severity) } as KnowledgeGapRecord) : null,
+    gap: visibleGap ? ({ ...visibleGap, severity: normalizeSeverity(visibleGap.severity) } as KnowledgeGapRecord) : null,
     richExplanation: makeRichExplanation({
       point: point as KnowledgePointRecord,
-      gap: gap as KnowledgeGapRecord | null,
-      archetypes: archetypes as ArchetypeRecord[],
+      gap: visibleGap as KnowledgeGapRecord | null,
+      archetypes: visibleArchetypes,
       relatedMistakes
     }),
-    archetypes: (archetypes as ArchetypeRecord[]).map((archetype) => ({
+    archetypes: visibleArchetypes.map((archetype) => ({
       id: archetype.id,
       title: archetype.title,
       pattern: archetype.pattern,

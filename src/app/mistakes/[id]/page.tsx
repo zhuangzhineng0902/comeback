@@ -4,6 +4,7 @@ import React from "react";
 
 import { OriginalPhotoViewer } from "@/components/OriginalPhotoViewer";
 import { prisma } from "@/lib/db";
+import { activeMistakeWhere } from "@/lib/review-status";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ function uploadedImageUrl(imagePath: string) {
 export default async function MistakeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const mistake = await prisma.mistake.findFirst({
-    where: { id, studentId: "default-student" },
+    where: activeMistakeWhere({ id, studentId: "default-student" }),
     include: {
       tutorMessages: { orderBy: { createdAt: "asc" } },
       mistakeArchetypes: { include: { archetype: true } }

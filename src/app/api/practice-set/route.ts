@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
 import { generatePracticeSet, type PracticeSource } from "@/lib/practice/generator";
+import { activeMistakeWhere } from "@/lib/review-status";
 
 const STUDENT_ID = "default-student";
 
@@ -20,18 +21,14 @@ export async function GET(request: Request) {
   const count = normalizeCount(searchParams.get("count"));
 
   const mistakes = await prisma.mistake.findMany({
-    where: {
+    where: activeMistakeWhere({
       studentId: STUDENT_ID,
       ...(subject ? { subject } : {}),
       ...(grade ? { grade } : {}),
-      OR: [
-        { needsManualReview: false, reviewStatus: { not: "not_wrong" } },
-        { reviewStatus: "confirmed_wrong" }
-      ],
       mistakeArchetypes: {
         some: {}
       }
-    },
+    }),
     include: {
       mistakeArchetypes: {
         include: {

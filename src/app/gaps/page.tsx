@@ -3,12 +3,26 @@ import React from "react";
 
 import { SeverityBadge } from "@/components/SeverityBadge";
 import { prisma } from "@/lib/db";
+import { activeMistakeWhere } from "@/lib/review-status";
 
 export const dynamic = "force-dynamic";
 
 export default async function GapsPage() {
   const gaps = await prisma.knowledgeGap.findMany({
-    where: { studentId: "default-student" },
+    where: {
+      studentId: "default-student",
+      knowledgePoint: {
+        archetypes: {
+          some: {
+            mistakeArchetypes: {
+              some: {
+                mistake: activeMistakeWhere({ studentId: "default-student" })
+              }
+            }
+          }
+        }
+      }
+    },
     include: { knowledgePoint: true },
     orderBy: [{ severityRank: "desc" }, { lastOccurredAt: "desc" }]
   });

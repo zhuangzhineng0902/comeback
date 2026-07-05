@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { activeMistakeWhere } from "@/lib/review-status";
 import { classifyStudyIntent, createStudyRefusal, type StudyIntentCategory } from "@/lib/study-guard";
 
 type BlockedStudyIntentCategory = Exclude<StudyIntentCategory, "study">;
@@ -21,7 +22,7 @@ export async function POST(request: Request) {
 
   if (body.mistakeId) {
     const mistake = await prisma.mistake.findFirst({
-      where: { id: body.mistakeId, studentId: "default-student" }
+      where: activeMistakeWhere({ id: body.mistakeId, studentId: "default-student" })
     });
 
     if (!mistake) {

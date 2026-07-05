@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { activeMistakeWhere } from "@/lib/review-status";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -7,11 +8,11 @@ export async function GET(request: Request) {
   const grade = searchParams.get("grade");
 
   const mistakes = await prisma.mistake.findMany({
-    where: {
+    where: activeMistakeWhere({
       studentId: "default-student",
       ...(subject ? { subject } : {}),
       ...(grade ? { grade } : {})
-    },
+    }),
     include: {
       mistakeArchetypes: {
         include: { archetype: true }
