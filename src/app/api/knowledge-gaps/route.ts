@@ -11,8 +11,8 @@ function normalizeSubject(value: string | null): Subject | undefined {
   return subjects.includes(value as Subject) ? (value as Subject) : undefined;
 }
 
-export async function GET(request?: Request) {
-  const url = request ? new URL(request.url) : null;
+export async function GET(request: Request) {
+  const url = new URL(request?.url ?? "http://localhost/api/knowledge-gaps");
   const grade = normalizeGrade(url?.searchParams.get("grade") ?? null);
   const subject = normalizeSubject(url?.searchParams.get("subject") ?? null);
   const gaps = await prisma.knowledgeGap.findMany({

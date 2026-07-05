@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatDateTimeToMinute } from "@/lib/date-format";
 
-type UploadStatus = "failed" | "queued" | "processing" | "needs_review" | "incomplete" | "succeeded";
+type UploadStatus = "failed" | "queued" | "processing" | "rerunning" | "needs_review" | "incomplete" | "succeeded";
 
 type UploadHistoryItem = {
   id: string;
@@ -35,18 +35,30 @@ type UploadHistoryResponse = {
     failed: number;
     needsReview: number;
     incomplete: number;
+    rerunning: number;
     retryable: number;
   };
 };
+
+type StatusFilter = "all" | "failed" | "needs_review" | "incomplete" | "rerunning";
 
 const statusClasses: Record<UploadStatus, string> = {
   failed: "border-red-200 bg-red-50 text-red-700",
   queued: "border-slate-200 bg-slate-50 text-slate-700",
   processing: "border-sky-200 bg-sky-50 text-sky-700",
+  rerunning: "border-violet-200 bg-violet-50 text-violet-700",
   needs_review: "border-orange-200 bg-orange-50 text-orange-800",
   incomplete: "border-amber-200 bg-amber-50 text-amber-800",
   succeeded: "border-emerald-200 bg-emerald-50 text-emerald-700"
 };
+
+const statusFilters: Array<{ value: StatusFilter; label: string; description: string }> = [
+  { value: "all", label: "全部", description: "查看所有上传图片" },
+  { value: "failed", label: "AI 未解析成功", description: "模型分析失败的图片" },
+  { value: "needs_review", label: "待人工复核", description: "需要界面人工确认的图片" },
+  { value: "incomplete", label: "未完全解析", description: "解析结果不完整的图片" },
+  { value: "rerunning", label: "重跑中", description: "正在重新解析的图片" }
+];
 
 async function readJson(response: Response) {
   try {
@@ -59,15 +71,30 @@ async function readJson(response: Response) {
 export function UploadHistoryPanel() {
   const [uploads, setUploads] = useState<UploadHistoryItem[]>([]);
   const [summary, setSummary] = useState<UploadHistoryResponse["summary"] | null>(null);
-  const [selectedJobIds, setSelectedJobIds] = useState<string[]>([]);
+  const [selectedUploadIds, setSelectedUploadIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const retryableUploads = useMemo(() => uploads.filter((upload) => upload.canRetry && upload.jobId), [uploads]);
-  const selectedRetryableCount = selectedJobIds.filter((jobId) =>
-    retryableUploads.some((upload) => upload.jobId === jobId)
+  const filteredUploads = useMemo(
+    () => uploads.filter((upload) => statusFilter === "all" || upload.status === statusFilter),
+    [uploads, statusFilter]
+  );
+  const filteredCounts = useMemo(
+    () => ({
+      all: uploads.length,
+      failed: uploads.filter((upload) => upload.status === "failed").length,
+      needs_review: uploads.filter((upload) => upload.status === "needs_review").length,
+      incomplete: uploads.filter((upload) => upload.status === "incomplete").length,
+      rerunning: uploads.filter((upload) => upload.status === "rerunning").length
+    }),
+    [uploads]
+  );
+  const retryableUploads = useMemo(() => filteredUploads.filter((upload) => upload.canRetry), [filteredUploads]);
+  const selectedRetryableCount = selectedUploadIds.filter((uploadId) =>
+    retryableUploads.some((upload) => upload.id === uploadId)
   ).length;
   const allRetryableSelected = retryableUploads.length > 0 && selectedRetryableCount === retryableUploads.length;
 
@@ -83,8 +110,8 @@ export function UploadHistoryPanel() {
       const nextData = data as unknown as UploadHistoryResponse;
       setUploads(nextData.uploads ?? []);
       setSummary(nextData.summary ?? null);
-      setSelectedJobIds((current) =>
-        current.filter((jobId) => (nextData.uploads ?? []).some((upload) => upload.jobId === jobId && upload.canRetry))
+      setSelectedUploadIds((current) =>
+        current.filter((uploadId) => (nextData.uploads ?? []).some((upload) => upload.id === uploadId && upload.canRetry))
       );
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "上传历史加载失败。");
@@ -108,17 +135,23 @@ export function UploadHistoryPanel() {
     return () => window.clearInterval(timer);
   }, [uploads, loadHistory]);
 
-  function toggleJob(jobId: string) {
-    setSelectedJobIds((current) =>
-      current.includes(jobId) ? current.filter((item) => item !== jobId) : [...current, jobId]
+  function toggleUpload(uploadId: string) {
+    setSelectedUploadIds((current) =>
+      current.includes(uploadId) ? current.filter((item) => item !== uploadId) : [...current, uploadId]
     );
   }
 
   function toggleAllRetryable() {
-    setSelectedJobIds(allRetryableSelected ? [] : retryableUploads.map((upload) => upload.jobId).filter(Boolean) as string[]);
+    const retryableIds = retryableUploads.map((upload) => upload.id);
+    setSelectedUploadIds((current) => {
+      if (allRetryableSelected) {
+        return current.filter((uploadId) => !retryableIds.includes(uploadId));
+      }
+      return Array.from(new Set([...current, ...retryableIds]));
+    });
   }
 
-  async function retry(jobIds?: string[]) {
+  async function retry(uploadIds?: string[]) {
     setIsRetrying(true);
     setError("");
     setMessage("");
@@ -126,15 +159,17 @@ export function UploadHistoryPanel() {
       const response = await fetch("/api/upload-history/retry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(jobIds?.length ? { jobIds } : {})
+        body: JSON.stringify(uploadIds?.length ? { uploadIds } : {})
       });
       const data = await readJson(response);
       if (!response.ok) {
         throw new Error(typeof data.error === "string" ? data.error : "重跑失败，请稍后再试。");
       }
       const retried = typeof data.retried === "number" ? data.retried : 0;
-      setMessage(retried > 0 ? `已重新排队 ${retried} 张失败图片。` : "当前没有可重跑的失败图片。");
-      setSelectedJobIds([]);
+      const skippedDuplicates = typeof data.skippedDuplicates === "number" ? data.skippedDuplicates : 0;
+      const duplicateMessage = skippedDuplicates > 0 ? `，已自动跳过 ${skippedDuplicates} 张重复图片` : "";
+      setMessage(retried > 0 ? `已重新排队 ${retried} 张历史图片${duplicateMessage}。` : "当前没有可重跑的历史图片。");
+      setSelectedUploadIds([]);
       await loadHistory();
     } catch (retryError) {
       setError(retryError instanceof Error ? retryError.message : "重跑失败，请稍后再试。");
@@ -162,7 +197,7 @@ export function UploadHistoryPanel() {
           </button>
           <button
             type="button"
-            onClick={() => void retry(selectedJobIds)}
+            onClick={() => void retry(selectedUploadIds)}
             disabled={isRetrying || selectedRetryableCount === 0}
             className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -171,18 +206,18 @@ export function UploadHistoryPanel() {
           </button>
           <button
             type="button"
-            onClick={() => void retry()}
+            onClick={() => void retry(retryableUploads.map((upload) => upload.id))}
             disabled={isRetrying || retryableUploads.length === 0}
             className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <RotateCcw className={`h-4 w-4 ${isRetrying ? "animate-spin" : ""}`} aria-hidden="true" />
-            重跑全部失败
+            重跑当前筛选
           </button>
         </div>
       </div>
 
       {summary ? (
-        <div className="grid gap-2 sm:grid-cols-4">
+        <div className="grid gap-2 sm:grid-cols-5">
           <div className="rounded-md border border-slate-200 bg-white p-3">
             <p className="text-xs text-slate-500">总图片</p>
             <p className="mt-1 text-xl font-semibold text-ink">{summary.total}</p>
@@ -199,6 +234,10 @@ export function UploadHistoryPanel() {
             <p className="text-xs text-amber-800">未完全解析</p>
             <p className="mt-1 text-xl font-semibold text-amber-800">{summary.incomplete}</p>
           </div>
+          <div className="rounded-md border border-violet-200 bg-violet-50 p-3">
+            <p className="text-xs text-violet-700">重跑中</p>
+            <p className="mt-1 text-xl font-semibold text-violet-700">{summary.rerunning}</p>
+          </div>
         </div>
       ) : null}
 
@@ -206,6 +245,34 @@ export function UploadHistoryPanel() {
       {message ? (
         <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{message}</p>
       ) : null}
+
+      <div className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+        <p className="text-xs font-medium text-slate-500">筛选</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {statusFilters.map((filter) => {
+            const count = filteredCounts[filter.value];
+            const isActive = statusFilter === filter.value;
+            return (
+              <button
+                key={filter.value}
+                type="button"
+                title={filter.description}
+                onClick={() => {
+                  setStatusFilter(filter.value);
+                  setSelectedUploadIds([]);
+                }}
+                className={`rounded-md border px-3 py-2 text-sm font-medium ${
+                  isActive
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                {filter.label} {count}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       <div className="rounded-md border border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
@@ -216,19 +283,23 @@ export function UploadHistoryPanel() {
             className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {allRetryableSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
-            可重跑 {retryableUploads.length} 张
+            全选当前筛选 {retryableUploads.length} 张
           </button>
-          <p className="text-xs text-slate-500">仅 AI 失败的批量图片支持直接重跑</p>
+          <p className="text-xs text-slate-500">
+            当前显示 {filteredUploads.length} 张，已选 {selectedRetryableCount} 张
+          </p>
         </div>
 
         {isLoading ? (
           <div className="p-6 text-sm text-slate-500">正在加载上传历史...</div>
         ) : uploads.length === 0 ? (
           <div className="p-6 text-sm text-slate-500">还没有上传记录。</div>
+        ) : filteredUploads.length === 0 ? (
+          <div className="p-6 text-sm text-slate-500">当前筛选下没有图片。</div>
         ) : (
           <div className="divide-y divide-slate-200">
-            {uploads.map((upload) => {
-              const checked = upload.jobId ? selectedJobIds.includes(upload.jobId) : false;
+            {filteredUploads.map((upload) => {
+              const checked = selectedUploadIds.includes(upload.id);
               return (
                 <article key={`${upload.kind}-${upload.id}`} className="grid gap-3 p-3 sm:grid-cols-[96px_minmax(0,1fr)_auto] sm:items-center">
                   <div className="h-24 w-full overflow-hidden rounded-md border border-slate-200 bg-slate-50 sm:w-24">
@@ -262,17 +333,17 @@ export function UploadHistoryPanel() {
                     ) : null}
                   </div>
                   <div className="flex justify-end">
-                    {upload.canRetry && upload.jobId ? (
+                    {upload.canRetry ? (
                       <button
                         type="button"
-                        onClick={() => toggleJob(upload.jobId as string)}
+                        onClick={() => toggleUpload(upload.id)}
                         className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                       >
                         {checked ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                         选择
                       </button>
                     ) : (
-                      <span className="text-xs text-slate-400">{upload.kind === "single" ? "可重新上传" : "无需重跑"}</span>
+                      <span className="text-xs text-slate-400">处理中</span>
                     )}
                   </div>
                 </article>

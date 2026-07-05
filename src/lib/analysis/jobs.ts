@@ -304,12 +304,12 @@ export async function getAnalysisBatchView(batchId: string) {
   };
 }
 
-export async function retryFailedAnalysisJobs(batchId: string, jobIds?: string[]) {
+export async function retryAnalysisJobs(batchId: string, jobIds?: string[]) {
   const jobs = await prisma.analysisJob.findMany({
     where: {
       batchId,
       studentId: STUDENT_ID,
-      status: "failed",
+      NOT: { status: { in: ["queued", "processing"] } },
       ...(jobIds?.length ? { id: { in: jobIds } } : {})
     }
   });
@@ -335,4 +335,22 @@ export async function retryFailedAnalysisJobs(batchId: string, jobIds?: string[]
   triggerAnalysisWorker();
 
   return { retried: jobs.length };
+}
+
+export async function retryFailedAnalysisJobs(batchId: string, jobIds?: string[]) {
+  const jobs = await prisma.analysisJob.findMany({
+    where: {
+      batchId,
+      studentId: STUDENT_ID,
+      status: "failed",
+      ...(jobIds?.length ? { id: { in: jobIds } } : {})
+    },
+    select: { id: true }
+  });
+
+  if (jobs.length === 0) {
+    return { retried: 0 };
+  }
+
+  return retryAnalysisJobs(batchId, jobs.map((job) => job.id));
 }

@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
 import type { AnalysisOutput } from "@/lib/types";
+import { resolveStoredUploadPath } from "@/lib/uploads";
 
 const STUDENT_ID = "default-student";
 
@@ -32,7 +35,11 @@ function jobStatus(input: {
   analysesCount: number;
   savedCount: number;
   needsReviewCount: number;
+  retryCount: number;
 }) {
+  if ((input.status === "queued" || input.status === "processing") && input.retryCount > 0) {
+    return { status: "rerunning", label: "重跑中" };
+  }
   if (input.status === "failed") {
     return { status: "failed", label: "AI 未解析成功" };
   }
@@ -46,6 +53,15 @@ function jobStatus(input: {
     return { status: "incomplete", label: "未完全解析" };
   }
   return { status: "succeeded", label: "已解析" };
+}
+
+async function imageDedupKey(imagePath: string) {
+  try {
+    const bytes = await readFile(resolveStoredUploadPath(imagePath));
+    return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+  } catch {
+    return `path:${imagePath}`;
+  }
 }
 
 export async function GET() {
@@ -79,11 +95,13 @@ export async function GET() {
       status: job.status,
       analysesCount: analyses.length,
       savedCount: savedMistakes.length,
-      needsReviewCount
+      needsReviewCount,
+      retryCount: job.retryCount
     });
 
     return {
       id: job.id,
+      imagePath: job.imagePath,
       kind: "job" as const,
       batchId: job.batchId,
       batchStatus: job.batch.status,
@@ -97,7 +115,7 @@ export async function GET() {
       needsReviewCount,
       retryCount: job.retryCount,
       errorMessage: job.errorMessage,
-      canRetry: job.status === "failed",
+      canRetry: status.status !== "rerunning" && job.status !== "queued" && job.status !== "processing",
       createdAt: job.createdAt.toISOString(),
       updatedAt: job.updatedAt.toISOString(),
       completedAt: job.completedAt?.toISOString() ?? null
@@ -124,6 +142,7 @@ export async function GET() {
 
     return {
       id: mistakeImagePath,
+      imagePath: mistakeImagePath,
       kind: "single" as const,
       batchId: null,
       batchStatus: null,
@@ -137,7 +156,7 @@ export async function GET() {
       needsReviewCount,
       retryCount: 0,
       errorMessage: null,
-      canRetry: false,
+      canRetry: true,
       createdAt: first.createdAt.toISOString(),
       updatedAt: latest.updatedAt.toISOString(),
       completedAt: latest.updatedAt.toISOString()
@@ -147,15 +166,59 @@ export async function GET() {
   const uploads = [...jobUploads, ...singleUploads].sort(
     (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
   );
+  const uploadsWithKeys = await Promise.all(
+    uploads.map(async (upload) => ({ ...upload, dedupKey: await imageDedupKey(upload.imagePath) }))
+  );
+  const latestByImage = new Map<string, (typeof uploadsWithKeys)[number]>();
+  const rerunningImages = new Set<string>();
+
+  for (const upload of uploadsWithKeys) {
+    if (upload.status === "rerunning") {
+      rerunningImages.add(upload.dedupKey);
+    }
+
+    const latest = latestByImage.get(upload.dedupKey);
+    if (!latest || new Date(upload.updatedAt).getTime() > new Date(latest.updatedAt).getTime()) {
+      latestByImage.set(upload.dedupKey, upload);
+    }
+  }
+
+  const syncedUploads = uploadsWithKeys.map((upload) => {
+    const latest = latestByImage.get(upload.dedupKey);
+    if (rerunningImages.has(upload.dedupKey)) {
+      return {
+        ...upload,
+        status: "rerunning",
+        statusLabel: "重跑中",
+        canRetry: false,
+        errorMessage: null
+      };
+    }
+
+    return latest
+      ? {
+          ...upload,
+          status: latest.status,
+          statusLabel: latest.statusLabel,
+          parsedMistakeCount: latest.parsedMistakeCount,
+          needsReviewCount: latest.needsReviewCount,
+          errorMessage: latest.errorMessage,
+          canRetry: latest.canRetry
+        }
+      : upload;
+  }).map((upload) =>
+    Object.fromEntries(Object.entries(upload).filter(([key]) => key !== "imagePath" && key !== "dedupKey"))
+  );
 
   return NextResponse.json({
-    uploads,
+    uploads: syncedUploads,
     summary: {
-      total: uploads.length,
-      failed: uploads.filter((upload) => upload.status === "failed").length,
-      needsReview: uploads.filter((upload) => upload.status === "needs_review").length,
-      incomplete: uploads.filter((upload) => upload.status === "incomplete").length,
-      retryable: uploads.filter((upload) => upload.canRetry).length
+      total: syncedUploads.length,
+      failed: syncedUploads.filter((upload) => upload.status === "failed").length,
+      needsReview: syncedUploads.filter((upload) => upload.status === "needs_review").length,
+      incomplete: syncedUploads.filter((upload) => upload.status === "incomplete").length,
+      rerunning: syncedUploads.filter((upload) => upload.status === "rerunning").length,
+      retryable: syncedUploads.filter((upload) => upload.canRetry).length
     }
   });
 }
