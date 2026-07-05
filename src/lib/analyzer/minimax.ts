@@ -8,6 +8,16 @@ const defaultModel = "MiniMax-M3";
 const defaultMaxCompletionTokens = 16000;
 const gradingMarkTypes = ["check", "cross", "partial", "deduction", "circle", "question", "none", "unknown"] as const;
 const mistakeJudgements = ["wrong", "partial", "suspected", "correct", "unknown"] as const;
+const childExplanationRequirements = [
+  "studentFriendlyExplanation 是“讲给孩子听”的主讲解，不能只给结论或口号；必须把解题思路打开。",
+  "studentFriendlyExplanation 至少包含：先读题找什么条件、为什么选这个方法、关键公式或规则怎么用、每一步如何算或判断、孩子原答案卡在哪里、最后怎样验算或回看。",
+  "表达要像老师面对初中生讲题：短句、具体、层层递进，可以用“先看、再想、所以、回头检查”组织；不要空泛地说“认真审题”“注意细节”。",
+  "如果是计算题，要写清主要代入、变形或计算路径；如果是阅读/英语/文科题，要写清定位依据、关键词、排除理由和答案从哪里来。"
+];
+const richWalkthroughRequirements = [
+  "richExplanation.walkthrough 每步 body 不能只有一句口号；每步都要说明这一步要看原题中的哪条信息、为什么这么做、做完后得到什么。",
+  "richExplanation.walkthrough 要覆盖完整解题链路：读题定位、建模/选规则、计算或推理、对照学生答案、检查易错点。compact 模式也要保留 2 个实质步骤。"
+];
 
 const richIllustrationSchema = z.object({
   type: z.enum(["flow", "compare", "treePath"]),
@@ -273,12 +283,14 @@ function buildPrompt(input: AnalyzeInput) {
     "不要把明显全对的题目放进 analyses；如果老师标记不清或字迹涂改严重但疑似出错，可以输出 suspected 并设置 needsConfirmation 为 true。",
     "不要用省略号，不要用字符串替代对象，不要输出 <think>。",
     "讲解要适合孩子阅读，深入浅出，但不要涉及游戏、娱乐网站、闲聊内容。",
+    ...childExplanationRequirements,
     "如果用户未提供学科或年级，请根据图片文字、题型、章节和知识点自动判断。",
     "年级判断优先看图片中的明确文字：初一/七年级/7年级/Grade 7 => 七年级；初二/八年级/8年级/Grade 8 => 八年级；初三/九年级/9年级/Grade 9 => 九年级。",
     "如果图片没有明确年级文字，再根据教材章节和题目难度推断；不要因为示例、学生档案或系统默认值选择八年级数学。",
     "richExplanation 必须是对象，包含 diagnosis, analogy, walkthrough, wrongAnswerInsight, treeContext, illustration, shenzhenExample。",
     "richExplanation.diagnosis 用一句话指出核心漏洞；analogy 必须用孩子熟悉的比方讲清楚。",
     "richExplanation.walkthrough 是 2 到 5 个步骤，每步包含 title 和 body，形成老师板书式讲解。",
+    ...richWalkthroughRequirements,
     "richExplanation.treeContext 必须给知识树上下文：path, prerequisites, current, next, confusions。",
     "richExplanation.shenzhenExample 必须给一道深圳题型风格的同类题；如果没有可靠来源，label 必须是“深圳题型风格”。",
     "不要把未核验来源的题目说成深圳真题；只有能确认公开来源时才使用“深圳真题参考”并填写 sourceNote。",
@@ -308,12 +320,14 @@ function buildRepairPrompt(content: string, input: AnalyzeInput) {
     "markType 只能是 check、cross、partial、deduction、circle、question、none、unknown；judgement 只能是 wrong、partial、suspected、correct、unknown。",
     "必须体现混合策略：识别老师批改标记，同时独立完整解题并对比学生答案，尤其保留半勾、扣分、远距离学生答案区域的信息。",
     "老师批改通常优先看红色红笔标记；黑色或铅笔在选项、图象旁边打的叉，可能是学生排除选项或草稿标记，不能仅凭黑色叉判为错题。",
+    ...childExplanationRequirements,
     "如果用户未提供学科或年级，请根据原始内容和图片信息自动判断。",
     "年级判断优先看图片中的明确文字：初一/七年级/7年级/Grade 7 => 七年级；初二/八年级/8年级/Grade 8 => 八年级；初三/九年级/9年级/Grade 9 => 九年级。",
     "如果没有明确年级文字，再根据教材章节和题目难度推断；不要因为示例、学生档案或系统默认值选择八年级数学。",
     "richExplanation 必须是对象，包含 diagnosis, analogy, walkthrough, wrongAnswerInsight, treeContext, illustration, shenzhenExample。",
     "richExplanation.diagnosis 用一句话指出核心漏洞；analogy 必须用孩子熟悉的比方讲清楚。",
     "richExplanation.walkthrough 是 2 到 5 个步骤，每步包含 title 和 body，形成老师板书式讲解。",
+    ...richWalkthroughRequirements,
     "richExplanation.treeContext 必须给知识树上下文：path, prerequisites, current, next, confusions。",
     "richExplanation.shenzhenExample 必须给一道深圳题型风格的同类题；如果没有可靠来源，label 必须是“深圳题型风格”。",
     "不要把未核验来源的题目说成深圳真题；只有能确认公开来源时才使用“深圳真题参考”并填写 sourceNote。",
@@ -335,6 +349,8 @@ function buildCompactRepairPrompt(content: string, input: AnalyzeInput) {
     "每个元素必须包含 sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
     "subject 只能是语文、数学、英语、物理、化学、生物、历史、地理、道德与法治；grade 只能是七年级、八年级、九年级。",
     "knowledgePoints 至少 1 个；practiceQuestions 只给 1 道；richExplanation.walkthrough 只给 2 步；illustration.nodes 最多 3 个。",
+    "studentFriendlyExplanation 必须保留完整思路：读题条件、选法原因、关键步骤、错因和检查方法都要交代，保持紧凑但不能只有一句提醒。",
+    "richExplanation.walkthrough 的 2 步必须是实质讲解，覆盖“怎么想”和“怎么做”。",
     "字符串里如果出现英文双引号，必须转义为 \\\"。",
     paperVisionContext,
     `用户提示学科：${input.subjectHint ?? "未提供，请根据图片自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请根据图片自动识别"}；文件名：${input.filename}。`,
@@ -352,6 +368,8 @@ function buildOcrOnlyPrompt(input: AnalyzeInput) {
     "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
     "每个元素必须包含 sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
     "practiceQuestions 只给 1 道；richExplanation.walkthrough 只给 2 到 3 步；illustration.nodes 最多 4 个；保持内容紧凑。",
+    "studentFriendlyExplanation 要把 OCR 能确定的题干条件、解法选择、推理步骤、错因和检查办法讲清楚；证据不足的地方要明确说需要人工确认。",
+    ...richWalkthroughRequirements,
     paperVisionContext,
     `用户提示学科：${input.subjectHint ?? "未提供，请根据 OCR 自动识别"}；用户提示年级：${input.gradeHint ?? "未提供，请根据 OCR 自动识别"}；文件名：${input.filename}。`
   ].filter(Boolean).join("\n");
@@ -507,7 +525,11 @@ function normalizeSingleAnalysisShape(value: unknown): unknown {
   normalizeRequiredStringField(record, "studentAnswer", "图片中未清晰识别到学生答案。");
   normalizeRequiredStringField(record, "correctAnswer", "需要结合题目重新推导。");
   normalizeRequiredStringField(record, "mistakeReason", "未识别到明确错因，建议先核对题目条件和作答步骤。");
-  normalizeRequiredStringField(record, "studentFriendlyExplanation", "先把题干条件圈出来，再一步一步核对自己的作答。");
+  normalizeRequiredStringField(
+    record,
+    "studentFriendlyExplanation",
+    "先把题干条件圈出来，分清题目已经给了什么、要求我们求什么。再选择对应的方法或公式，把每一步为什么这样做说清楚，并和自己的答案逐项对照。最后回到题干检查单位、符号、关键词或选项限制，看看错误是从审题、套公式还是计算中出现的。"
+  );
   normalizeRequiredStringField(record, "example", "可以先用同类基础题练习，再回到原题。");
   record.gradingEvidence = normalizeGradingEvidence(record.gradingEvidence);
 

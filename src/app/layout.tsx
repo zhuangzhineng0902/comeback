@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { HistoryNavigation } from "@/components/HistoryNavigation";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -11,6 +12,7 @@ const navItems = [
   { href: "/", label: "AI 老师" },
   { href: "/mistakes", label: "错题本" },
   { href: "/review", label: "人工复核" },
+  { href: "/uploads", label: "上传历史" },
   { href: "/practice", label: "模拟练习" },
   { href: "/gaps", label: "知识漏洞" },
   { href: "/tree", label: "期末知识树" }
@@ -23,9 +25,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <div className="min-h-screen">
           <header className="border-b border-slate-200 bg-white print:hidden">
             <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-4">
-              <Link href="/" className="text-lg font-semibold text-ink">
-                私人教师 Agent
-              </Link>
+              <div className="flex min-w-0 items-center gap-2">
+                <HistoryNavigation />
+                <Link href="/" className="truncate text-lg font-semibold text-ink">
+                  私人教师 Agent
+                </Link>
+              </div>
               <nav className="-mx-4 flex gap-2 overflow-x-auto px-4 text-sm sm:mx-0 sm:px-0">
                 {navItems.map((item) => (
                   <Link
