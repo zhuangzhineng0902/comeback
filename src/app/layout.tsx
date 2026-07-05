@@ -9,7 +9,8 @@ export const metadata: Metadata = {
 };
 
 const navItems = [
-  { href: "/", label: "AI 老师" },
+  { href: "/", label: "首页" },
+  { href: "/teacher", label: "AI 老师" },
   { href: "/mistakes", label: "错题本" },
   { href: "/review", label: "人工复核" },
   { href: "/uploads", label: "上传历史" },
