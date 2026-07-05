@@ -10,3 +10,13 @@ body {
   background: #f8fafc;
   color: #1f2937;
 }
+
+@media print {
+  @page {
+    margin: 14mm;
+  }
+
+  body {
+    background: #ffffff;
+  }
+}

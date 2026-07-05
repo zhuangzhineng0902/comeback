@@ -10,6 +10,7 @@ export const metadata: Metadata = {
 const navItems = [
   { href: "/", label: "AI 老师" },
   { href: "/mistakes", label: "错题本" },
+  { href: "/practice", label: "模拟练习" },
   { href: "/gaps", label: "知识漏洞" },
   { href: "/tree", label: "期末知识树" }
 ];
@@ -19,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="zh-CN">
       <body>
         <div className="min-h-screen">
-          <header className="border-b border-slate-200 bg-white">
+          <header className="border-b border-slate-200 bg-white print:hidden">
             <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-4">
               <Link href="/" className="text-lg font-semibold text-ink">
                 私人教师 Agent
