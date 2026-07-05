@@ -24,6 +24,10 @@ export async function GET(request: Request) {
       studentId: STUDENT_ID,
       ...(subject ? { subject } : {}),
       ...(grade ? { grade } : {}),
+      OR: [
+        { needsManualReview: false, reviewStatus: { not: "not_wrong" } },
+        { reviewStatus: "confirmed_wrong" }
+      ],
       mistakeArchetypes: {
         some: {}
       }

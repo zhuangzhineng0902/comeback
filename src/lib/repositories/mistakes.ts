@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/db";
 import { calculateGapSeverity, getGapSeverityRank } from "@/lib/knowledge/severity";
 import type { AnalysisOutput } from "@/lib/types";
@@ -13,6 +15,105 @@ function normalizeQuestionText(value: string) {
     .toLowerCase()
     .replace(/\s+/g, "")
     .replace(/[，。！？；：、,.!?;:()[\]（）【】{}<>《》"'“”‘’]/g, "");
+}
+
+function reviewStateForAnalysis(analysis: AnalysisOutput) {
+  const judgement = analysis.gradingEvidence?.judgement ?? "unknown";
+  const needsManualReview =
+    analysis.gradingEvidence?.needsConfirmation === true ||
+    judgement === "suspected" ||
+    judgement === "unknown";
+
+  return {
+    aiJudgement: judgement,
+    needsManualReview,
+    reviewStatus: needsManualReview ? "pending" : "not_required"
+  };
+}
+
+async function recalculateKnowledgeGap(tx: Prisma.TransactionClient, input: {
+  studentId: string;
+  knowledgePointId: string;
+  latestReason?: string;
+}) {
+  const activeMistakeWhere = {
+    studentId: input.studentId,
+    reviewStatus: { not: "not_wrong" },
+    mistakeArchetypes: {
+      some: {
+        archetype: {
+          knowledgePointId: input.knowledgePointId
+        }
+      }
+    }
+  };
+
+  const errorCount = await tx.mistake.count({ where: activeMistakeWhere });
+  const archetypeCounts = await tx.mistakeArchetype.groupBy({
+    by: ["archetypeId"],
+    where: {
+      mistake: activeMistakeWhere
+    },
+    _count: { archetypeId: true }
+  });
+  const repeatedArchetypeCount = archetypeCounts.reduce(
+    (max, item) => Math.max(max, item._count.archetypeId),
+    0
+  );
+  const severity = calculateGapSeverity({ errorCount, repeatedArchetypeCount });
+  const severityRank = getGapSeverityRank(severity);
+  const reviewSuggestion =
+    severity === "repeated_archetype"
+      ? "优先复习这类母题，先按模板做 3 道变式题。"
+      : "先回看错因，再完成一组相似练习。";
+
+  const existing = await tx.knowledgeGap.findUnique({
+    where: {
+      studentId_knowledgePointId: {
+        studentId: input.studentId,
+        knowledgePointId: input.knowledgePointId
+      }
+    }
+  });
+
+  if (errorCount === 0) {
+    if (existing) {
+      await tx.knowledgeGap.delete({ where: { id: existing.id } });
+    }
+    return null;
+  }
+
+  return tx.knowledgeGap.upsert({
+    where: {
+      studentId_knowledgePointId: {
+        studentId: input.studentId,
+        knowledgePointId: input.knowledgePointId
+      }
+    },
+    update: {
+      errorCount,
+      relatedMistakeCount: errorCount,
+      repeatedArchetypeCount,
+      severity,
+      severityRank,
+      typicalReasons: JSON.stringify(input.latestReason ? [input.latestReason] : []),
+      lastOccurredAt: new Date(),
+      reviewSuggestion
+    },
+    create: {
+      studentId: input.studentId,
+      knowledgePointId: input.knowledgePointId,
+      errorCount,
+      relatedMistakeCount: errorCount,
+      repeatedArchetypeCount,
+      severity,
+      severityRank,
+      typicalReasons: JSON.stringify(input.latestReason ? [input.latestReason] : []),
+      lastOccurredAt: new Date(),
+      masteryLevel: 0,
+      reviewSuggestion
+    }
+  });
 }
 
 export async function saveAnalysisAsMistake(input: SaveAnalysisInput) {
@@ -64,6 +165,7 @@ export async function saveAnalysisAsMistake(input: SaveAnalysisInput) {
     });
 
     const normalizedQuestion = normalizeQuestionText(input.analysis.recognizedText);
+    const reviewState = reviewStateForAnalysis(input.analysis);
     const existingMistakes = await tx.mistake.findMany({
       where: {
         studentId: input.studentId,
@@ -107,6 +209,9 @@ export async function saveAnalysisAsMistake(input: SaveAnalysisInput) {
         explanation: input.analysis.studentFriendlyExplanation,
         mistakeReason: input.analysis.mistakeReason,
         masteryStatus: "new",
+        aiJudgement: reviewState.aiJudgement,
+        needsManualReview: reviewState.needsManualReview,
+        reviewStatus: reviewState.reviewStatus,
         mistakeArchetypes: {
           create: {
             archetypeId: archetype.id,
@@ -126,69 +231,64 @@ export async function saveAnalysisAsMistake(input: SaveAnalysisInput) {
       }
     });
 
-    const errorCount = await tx.mistake.count({
+    const gap = await recalculateKnowledgeGap(tx, {
+      studentId: input.studentId,
+      knowledgePointId: knowledgePoint.id,
+      latestReason: input.analysis.mistakeReason
+    });
+    if (!gap) {
+      throw new Error("Failed to create knowledge gap for saved mistake.");
+    }
+
+    return { mistake, gap, knowledgePoint, archetype };
+  }, { maxWait: 10_000, timeout: 20_000 });
+}
+
+export async function updateMistakeManualReview(input: {
+  mistakeId: string;
+  studentId: string;
+  reviewStatus: "confirmed_wrong" | "not_wrong";
+  reviewNote?: string;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const mistake = await tx.mistake.findFirst({
       where: {
-        studentId: input.studentId,
-        subject: input.analysis.subject,
-        grade: input.analysis.grade,
+        id: input.mistakeId,
+        studentId: input.studentId
+      },
+      include: {
         mistakeArchetypes: {
-          some: {
-            archetype: {
-              knowledgePointId: knowledgePoint.id
-            }
+          include: {
+            archetype: true
           }
         }
       }
     });
 
-    const repeatedArchetypeCount = await tx.mistakeArchetype.count({
-      where: {
-        archetypeId: archetype.id,
-        mistake: {
-          studentId: input.studentId
-        }
+    if (!mistake) {
+      return null;
+    }
+
+    const updated = await tx.mistake.update({
+      where: { id: mistake.id },
+      data: {
+        needsManualReview: false,
+        reviewStatus: input.reviewStatus,
+        reviewNote: input.reviewNote?.trim() || null,
+        reviewedAt: new Date(),
+        masteryStatus: input.reviewStatus === "not_wrong" ? "mastered" : mistake.masteryStatus
       }
     });
 
-    const severity = calculateGapSeverity({ errorCount, repeatedArchetypeCount });
-    const severityRank = getGapSeverityRank(severity);
-    const reviewSuggestion =
-      severity === "repeated_archetype"
-        ? "优先复习这类母题，先按模板做 3 道变式题。"
-        : "先回看错因，再完成一组相似练习。";
-
-    const gap = await tx.knowledgeGap.upsert({
-      where: {
-        studentId_knowledgePointId: {
-          studentId: input.studentId,
-          knowledgePointId: knowledgePoint.id
-        }
-      },
-      update: {
-        errorCount,
-        relatedMistakeCount: errorCount,
-        repeatedArchetypeCount,
-        severity,
-        severityRank,
-        typicalReasons: JSON.stringify([input.analysis.mistakeReason]),
-        lastOccurredAt: new Date(),
-        reviewSuggestion
-      },
-      create: {
+    const pointIds = new Set(mistake.mistakeArchetypes.map((relation) => relation.archetype.knowledgePointId));
+    for (const knowledgePointId of pointIds) {
+      await recalculateKnowledgeGap(tx, {
         studentId: input.studentId,
-        knowledgePointId: knowledgePoint.id,
-        errorCount,
-        relatedMistakeCount: errorCount,
-        repeatedArchetypeCount,
-        severity,
-        severityRank,
-        typicalReasons: JSON.stringify([input.analysis.mistakeReason]),
-        lastOccurredAt: new Date(),
-        masteryLevel: 0,
-        reviewSuggestion
-      }
-    });
+        knowledgePointId,
+        latestReason: input.reviewStatus === "not_wrong" ? undefined : mistake.mistakeReason
+      });
+    }
 
-    return { mistake, gap, knowledgePoint, archetype };
+    return updated;
   }, { maxWait: 10_000, timeout: 20_000 });
 }
