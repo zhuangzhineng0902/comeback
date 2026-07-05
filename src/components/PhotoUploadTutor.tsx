@@ -368,11 +368,11 @@ export function PhotoUploadTutor() {
 
   return (
     <>
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <section className="space-y-5">
-        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
+    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-5">
+      <section className="min-w-0 space-y-4 lg:space-y-5">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <h1 className="text-xl font-semibold text-ink">AI 老师</h1>
               <p className="mt-1 text-sm text-slate-600">拍照登记错题，老师会整理错因、漏洞和母题。</p>
             </div>
@@ -380,7 +380,7 @@ export function PhotoUploadTutor() {
               type="button"
               onClick={analyze}
               disabled={isAnalyzing}
-              className="inline-flex h-10 items-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-slate-900 px-4 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400 sm:w-auto"
             >
               <Upload aria-hidden="true" size={18} />
               {isAnalyzing ? "分析中" : "开始分析"}
@@ -450,7 +450,7 @@ export function PhotoUploadTutor() {
         </div>
 
         {batchView ? (
-          <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-ink">AI 处理列表</h2>
@@ -462,7 +462,7 @@ export function PhotoUploadTutor() {
                 <button
                   type="button"
                   onClick={retryFailedJobs}
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-sky-300 hover:text-sky-700"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-sky-300 hover:text-sky-700 sm:w-auto"
                 >
                   批量重试失败项
                 </button>
@@ -486,7 +486,7 @@ export function PhotoUploadTutor() {
                       : "border-sky-200 bg-sky-50 text-sky-800";
 
                 return (
-                  <div key={job.id} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                  <div key={job.id} className="min-w-0 rounded-md border border-slate-200 bg-slate-50 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-ink">
@@ -516,7 +516,7 @@ export function PhotoUploadTutor() {
             {resultImageGroups.map((group, groupIndex) => (
               <section
                 key={group.image?.url ?? `image-group-${groupIndex}`}
-                className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+                className="min-w-0 space-y-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4"
               >
                 {group.image ? (
                   <div className="space-y-3">
@@ -561,13 +561,13 @@ export function PhotoUploadTutor() {
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-slate-200 bg-white p-5 text-sm leading-6 text-slate-600 shadow-sm">
+          <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm leading-6 text-slate-600 shadow-sm sm:p-5">
             上传后会在这里看到题目识别、错因、孩子版讲解、母题模板和练习题。
           </div>
         )}
       </section>
 
-      <aside className="flex min-h-[520px] flex-col rounded-lg border border-slate-200 bg-white shadow-sm">
+      <aside className="flex min-h-[420px] min-w-0 flex-col rounded-lg border border-slate-200 bg-white shadow-sm lg:min-h-[520px]">
         <section className="border-b border-slate-200 p-4">
           <h2 className="text-base font-semibold text-ink">历史记录</h2>
           <p className="mt-1 text-sm text-slate-500">最近的 AI 分析和对话。</p>
@@ -611,7 +611,7 @@ export function PhotoUploadTutor() {
               className={`rounded-md px-3 py-2 text-sm leading-6 ${
                 message.role === "assistant"
                   ? "bg-slate-100 text-slate-700"
-                  : "ml-8 bg-slate-900 text-white"
+                  : "ml-4 bg-slate-900 text-white sm:ml-8"
               }`}
             >
               {message.content}
@@ -620,7 +620,7 @@ export function PhotoUploadTutor() {
         </div>
 
         <div className="border-t border-slate-200 p-3">
-          <div className="flex gap-2">
+          <div className="flex min-w-0 gap-2">
             <input
               value={question}
               onChange={(event) => setQuestion(event.target.value)}

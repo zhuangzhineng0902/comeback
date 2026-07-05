@@ -14,11 +14,16 @@ export type TreeNode = {
 };
 
 function NodeView({ node, depth = 0 }: { node: TreeNode; depth?: number }) {
+  const desktopIndent = `${Math.min(depth, 4) * 14}px`;
+
   return (
-    <li className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3" style={{ paddingLeft: depth * 14 }}>
-        <div>
-          <Link href={`/knowledge-points/${node.id}`} className="font-medium text-ink hover:text-sky-700">
+    <li className="min-w-0 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+      <div
+        className="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:pl-[var(--tree-indent)]"
+        style={{ "--tree-indent": desktopIndent } as React.CSSProperties}
+      >
+        <div className="min-w-0">
+          <Link href={`/knowledge-points/${node.id}`} className="break-words font-medium text-ink hover:text-sky-700">
             {node.name}
           </Link>
           <p className="mt-1 text-xs text-slate-500">

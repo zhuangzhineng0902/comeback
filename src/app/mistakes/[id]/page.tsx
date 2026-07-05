@@ -37,12 +37,12 @@ export default async function MistakeDetailPage({ params }: { params: Promise<{ 
   const originalFilename = path.basename(mistake.imagePath);
 
   return (
-    <article className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <article className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-5">
+      <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <div className="text-sm text-slate-500">
           {mistake.grade} · {mistake.subject}
         </div>
-        <h1 className="mt-2 text-2xl font-semibold text-ink">{mistake.questionType}</h1>
+        <h1 className="mt-2 break-words text-xl font-semibold text-ink sm:text-2xl">{mistake.questionType}</h1>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <div className="rounded-md border border-slate-200 p-3">
@@ -65,10 +65,10 @@ export default async function MistakeDetailPage({ params }: { params: Promise<{ 
         <p className="mt-2 text-sm leading-6 text-slate-700">{mistake.explanation}</p>
       </section>
 
-      <aside className="space-y-4">
+      <aside className="min-w-0 space-y-4">
         <OriginalPhotoViewer filename={originalFilename} imageUrl={uploadedImageUrl(mistake.imagePath)} />
 
-        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
           <h2 className="font-semibold text-ink">母题</h2>
           {mistake.mistakeArchetypes.length === 0 ? (
             <p className="mt-3 text-sm text-slate-600">这道题还没有归入母题。</p>
@@ -90,7 +90,7 @@ export default async function MistakeDetailPage({ params }: { params: Promise<{ 
           )}
         </section>
 
-        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
           <h2 className="font-semibold text-ink">追问记录</h2>
           {mistake.tutorMessages.length === 0 ? (
             <p className="mt-3 text-sm text-slate-600">还没有围绕这道题继续提问。</p>

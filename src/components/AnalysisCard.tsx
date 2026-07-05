@@ -106,7 +106,7 @@ export function AnalysisCard({ analysis, gapSeverity, mode }: AnalysisCardProps)
   const severity = severityCopy[gapSeverity];
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <article className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white">
           {analysis.grade} · {analysis.subject}
@@ -119,8 +119,8 @@ export function AnalysisCard({ analysis, gapSeverity, mode }: AnalysisCardProps)
         </span>
       </div>
 
-      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <section className="space-y-4">
+      <div className="mt-5 grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <section className="min-w-0 space-y-4">
           <div>
             <h2 className="text-base font-semibold text-ink">{analysis.questionType}</h2>
             <p className="mt-2 text-sm leading-6 text-slate-700">{analysis.recognizedText}</p>
@@ -155,7 +155,7 @@ export function AnalysisCard({ analysis, gapSeverity, mode }: AnalysisCardProps)
           )}
         </section>
 
-        <aside className="space-y-4">
+        <aside className="min-w-0 space-y-4">
           <div className="rounded-md border border-slate-200 p-4">
             <p className="text-xs font-medium text-slate-500">母题</p>
             <h3 className="mt-2 text-sm font-semibold text-ink">{analysis.archetype.title}</h3>

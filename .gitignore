@@ -1,5 +1,6 @@
 .superpowers/
 .worktrees/
+.venv-ocr/
 .DS_Store
 node_modules/
 .next/

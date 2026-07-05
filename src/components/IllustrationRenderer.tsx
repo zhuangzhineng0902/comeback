@@ -52,9 +52,9 @@ export function IllustrationRenderer({ illustration }: IllustrationRendererProps
           {illustration.nodes.map((node, index) => (
             <div
               key={`${node.label}-${index}`}
-              className={`min-w-0 break-words rounded-md border p-2 ${nodeClassName(node.tone)}`}
+              className={`min-w-0 break-words rounded-md border p-2 sm:ml-[var(--tree-indent)] ${nodeClassName(node.tone)}`}
               data-illustration-node
-              style={{ marginLeft: `${Math.min(index, 4) * 14}px` }}
+              style={{ "--tree-indent": `${Math.min(index, 4) * 14}px` } as React.CSSProperties}
             >
               <p className={labelClassName}>{node.label}</p>
               {node.detail ? <p className={detailClassName}>{node.detail}</p> : null}

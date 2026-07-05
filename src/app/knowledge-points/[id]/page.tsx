@@ -45,13 +45,13 @@ export default async function KnowledgePointDetailPage({ params }: { params: Pro
         </Link>
       </div>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="text-sm text-slate-500">
               {knowledgePoint.grade} · {knowledgePoint.subject} · {knowledgePoint.chapter}
             </p>
-            <h1 className="mt-2 min-w-0 break-words text-2xl font-semibold text-ink">{knowledgePoint.name}</h1>
+            <h1 className="mt-2 min-w-0 break-words text-xl font-semibold text-ink sm:text-2xl">{knowledgePoint.name}</h1>
           </div>
           <SeverityBadge severity={gap?.severity ?? "normal"} />
         </div>
@@ -76,7 +76,7 @@ export default async function KnowledgePointDetailPage({ params }: { params: Pro
 
       <RichExplanationCard explanation={richExplanation} />
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <h2 className="text-lg font-semibold text-ink">母题讲解</h2>
         {archetypes.length === 0 ? (
           <p className="mt-3 text-sm text-slate-600">这个知识点还没有沉淀母题，后续错题分析会自动补充。</p>
@@ -96,7 +96,7 @@ export default async function KnowledgePointDetailPage({ params }: { params: Pro
         )}
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <h2 className="text-lg font-semibold text-ink">关联错题</h2>
         {relatedMistakes.length === 0 ? (
           <p className="mt-3 text-sm text-slate-600">还没有直接关联到这个知识点的错题。</p>
