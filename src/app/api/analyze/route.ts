@@ -410,7 +410,9 @@ export async function POST(request: Request) {
       })),
       paperVisionContexts: paperVisionContexts.length > 0 ? paperVisionContexts : undefined,
       subjectHint: subject,
-      gradeHint: grade
+      gradeHint: grade,
+      paperLayout: "independent_pages" as const,
+      analysisDetail: "compact" as const
     };
     const results = uploadedImages.length === 1
       ? [await analyzeWithFallback(analyzeInput)]
@@ -433,6 +435,7 @@ export async function POST(request: Request) {
               paperVisionContexts: imagePaperVisionContexts,
               subjectHint: subject,
               gradeHint: grade,
+              paperLayout: "independent_pages" as const,
               analysisDetail: "compact" as const
             };
             try {

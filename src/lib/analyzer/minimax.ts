@@ -270,8 +270,13 @@ function formatPaperVisionContexts(input: AnalyzeInput) {
   return [
     "OCR 前置识别结果如下，这是给你定位题号、题干、学生答案区域和版面的紧凑证据层；layoutRegions 是 OCRAutoScore YOLO 检出的答题卡作答区域。",
     "请优先用 OCR 文本校对题干、题号、选项和普通印刷文字；同时必须继续查看原图来识别手写答案、批改符号、涂改痕迹和公式细节。",
-    "如果存在 mistakeCandidates（错题候选），必须逐个分析 mistakeCandidates；除非原图能明确证明候选是全对，否则每个候选都要在 analyses 中输出一项。",
+    input.paperLayout === "question_pages_with_answer_sheet"
+      ? "如果存在 mistakeCandidates（错题候选），必须逐个分析；只有答题卡原图能明确证明候选不是错误时才可排除。"
+      : "单张试卷已对 mistakeCandidates 做高置信度过滤。只允许分析和输出 mistakeCandidates 中列出的题号/小题号，不得脱离候选扫描整页新增错题。仍须查看原图二次确认，排除长红勾、斜线、批注或跨栏轨迹；候选证据不明确时输出 suspected 并进入人工复核。",
     "mistakeCandidates 来自题号、红笔批改标记和空间位置匹配；填空题、解答题、小题候选也必须覆盖，不要只返回选择题或第一题。",
+    input.paperLayout === "independent_pages"
+      ? "同一大题有多个小题时按小题号分别核对；大题14的(2)、(4)等必须准确保留小题号。大面积贯穿多题的红色斜线通常是整题勾选或批阅轨迹，不能拆成多个错题。"
+      : "",
     "如果 OCR 文本与图片视觉冲突，以原图为准，并在 gradingEvidence.evidenceSummary 中说明冲突。",
     "坐标 bbox 格式为 [x1,y1,x2,y2]，可用于判断学生答案是否离题干较远。",
     JSON.stringify(contexts)
@@ -938,6 +943,7 @@ function isMiniMaxTimeout(error: unknown) {
 }
 
 function getMistakeCandidateCount(input: AnalyzeInput) {
+  if (input.paperLayout === "independent_pages") return 0;
   return input.paperVisionContexts?.reduce((count, context) => count + (context.mistakeCandidates?.length ?? 0), 0) ?? 0;
 }
 
@@ -965,6 +971,7 @@ function isCandidateCovered(candidate: PaperVisionMistakeCandidate, analyses: An
 }
 
 function getMissingMistakeCandidates(input: AnalyzeInput, analyses: AnalysisOutput[]) {
+  if (input.paperLayout === "independent_pages") return [];
   return getMistakeCandidates(input).filter((candidate) => !isCandidateCovered(candidate, analyses));
 }
 
@@ -1070,8 +1077,10 @@ async function parseWithRepairs(input: {
         return parseAnalysis(compactContent);
       }
     } catch (repairError) {
-      if (getMistakeCandidateCount(input.analyzeInput) > 0) {
-        return appendCandidateFallbackAnalyses(input.analyzeInput, []);
+      if (getMistakeCandidates(input.analyzeInput).length > 0) {
+        return getMistakeCandidates(input.analyzeInput).map((candidate) =>
+          buildCandidateFallbackAnalysis(candidate, input.analyzeInput, [])
+        );
       }
 
       throw repairError;
@@ -1123,7 +1132,10 @@ export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisO
     content = await analyzeMiniMaxOcrOnly({ baseUrl, apiKey, analyzeInput: input });
   }
 
-  const analyses = await parseWithRepairs({ baseUrl, apiKey, analyzeInput: input, content });
+  const parsedAnalyses = await parseWithRepairs({ baseUrl, apiKey, analyzeInput: input, content });
+  const analyses = input.paperLayout === "independent_pages"
+    ? parsedAnalyses.filter((analysis) => analysis.gradingEvidence?.judgement !== "correct")
+    : parsedAnalyses;
   const candidateCount = getMistakeCandidateCount(input);
   const missingCandidates = getMissingMistakeCandidates(input, analyses);
   if (candidateCount > 0 && missingCandidates.length > 0) {

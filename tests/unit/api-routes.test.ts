@@ -180,7 +180,10 @@ describe("api routes", () => {
         { filename: "paper photo.png", mimeType: "image/png", imageBase64: Buffer.from("image-bytes").toString("base64") }
       ],
       subjectHint: "数学",
-      gradeHint: "八年级"
+      gradeHint: "八年级",
+      paperLayout: "independent_pages",
+      analysisDetail: "compact",
+      paperVisionContexts: undefined
     });
     expect(saveAnalysisAsMistakeMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -493,7 +496,10 @@ describe("api routes", () => {
         }
       ],
       subjectHint: undefined,
-      gradeHint: undefined
+      gradeHint: undefined,
+      paperLayout: "independent_pages",
+      analysisDetail: "compact",
+      paperVisionContexts: undefined
     });
   });
 

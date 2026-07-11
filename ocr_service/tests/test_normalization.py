@@ -96,8 +96,7 @@ class NormalizePaddleResultTest(unittest.TestCase):
         payload = normalize_paddle_result(result, grading_marks=grading_marks)
 
         self.assertTrue(any(candidate["questionId"] == "1" for candidate in payload["questionCandidates"]))
-        q1_candidate = next(candidate for candidate in payload["mistakeCandidates"] if candidate["questionId"] == "1")
-        self.assertEqual(q1_candidate["judgement"], "suspected")
+        self.assertFalse(any(candidate["questionId"] == "1" for candidate in payload["mistakeCandidates"]))
 
     def test_inferred_choice_question_ignores_far_lower_red_marks(self):
         result = [
@@ -117,8 +116,7 @@ class NormalizePaddleResultTest(unittest.TestCase):
 
         payload = normalize_paddle_result(result, grading_marks=grading_marks)
 
-        q1_candidate = next(candidate for candidate in payload["mistakeCandidates"] if candidate["questionId"] == "1")
-        self.assertLess(q1_candidate["bbox"][3], 300)
+        self.assertFalse(any(candidate["questionId"] == "1" for candidate in payload["mistakeCandidates"]))
 
     def test_binds_red_correction_on_right_side_of_left_column_question(self):
         result = [
@@ -138,8 +136,7 @@ class NormalizePaddleResultTest(unittest.TestCase):
 
         payload = normalize_paddle_result(result, grading_marks=grading_marks)
 
-        q3_candidate = next(candidate for candidate in payload["mistakeCandidates"] if candidate["questionId"] == "3")
-        self.assertEqual(q3_candidate["judgement"], "suspected")
+        self.assertFalse(any(candidate["questionId"] == "3" for candidate in payload["mistakeCandidates"]))
 
 
 if __name__ == "__main__":

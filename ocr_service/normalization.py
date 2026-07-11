@@ -111,7 +111,9 @@ def _candidate_from_block(block: dict[str, Any], index: int) -> dict[str, Any] |
         return None
 
     text = QUESTION_PREFIX_RE.sub("", block["text"], count=1).strip()
-    if match.group(1) in {"一", "二", "三", "四"} and re.search(r"选择题|填空题|解答题|本题|共\d+小题", text):
+    if match.group(1) == "0":
+        return None
+    if match.group(1) in {"一", "二", "三", "四"} and re.search(r"选择题|填空题|解.*题|本题|共\d+小题", text):
         return None
 
     return {
@@ -213,6 +215,11 @@ def _is_mark_in_question_column(mark_box: list[float] | None, question_box: list
     return question_box[0] - left_tolerance <= mark_x <= question_box[2] + right_tolerance
 
 
+def _is_major_solution_question(question: dict[str, Any]) -> bool:
+    question_id = str(question.get("questionId", ""))
+    return question_id.isdigit() and int(question_id) >= 14
+
+
 def _find_nearest_question(mark: dict[str, Any], questions: list[dict[str, Any]]) -> dict[str, Any] | None:
     mark_center = _center(mark.get("bbox"))
     if not mark_center:
@@ -230,18 +237,22 @@ def _find_nearest_question(mark: dict[str, Any], questions: list[dict[str, Any]]
             continue
         if question.get("inferred") and abs(mark_center[1] - question_center[1]) > 110:
             continue
-        if not _is_mark_in_question_column(mark.get("bbox"), question_box):
+        if not _is_mark_in_question_column(mark.get("bbox"), question_box) and not (
+            _is_major_solution_question(question)
+            and question_box
+            and question_box[0] - 120 <= mark_center[0] <= question_box[2] + 650
+        ):
             continue
-        if prefer_right_column and question_center[0] < median_x:
+        if prefer_right_column and question_center[0] < median_x and not _is_major_solution_question(question):
             continue
-        if not prefer_right_column and question_center[0] > median_x + 180:
+        if not prefer_right_column and question_center[0] > median_x + 180 and not _is_major_solution_question(question):
             continue
         y_gap = mark_center[1] - question_center[1]
         if y_gap < -90:
             continue
         overlap = _horizontal_overlap_ratio(mark.get("bbox"), question_box)
         x_gap = max(0, question_box[0] - mark_center[0], mark_center[0] - question_box[2])
-        if overlap <= 0 and x_gap > 420:
+        if overlap <= 0 and x_gap > (700 if _is_major_solution_question(question) else 420):
             continue
         ranked.append((abs(y_gap) + x_gap * 0.4 + _distance(mark_center, question_center) * 0.05, question))
 
@@ -262,7 +273,7 @@ def _find_sub_question(mark: dict[str, Any], blocks: list[dict[str, Any]], quest
         block_center = _center(block.get("bbox"))
         if not match or not block_center:
             continue
-        if question and not _is_mark_in_question_column(block.get("bbox"), question.get("bbox")):
+        if question and not _is_mark_in_question_column(block.get("bbox"), question.get("bbox")) and not _is_major_solution_question(question):
             continue
         if block_center[1] < question_y - 20:
             continue
@@ -291,6 +302,8 @@ def _is_candidate_grading_mark(mark: dict[str, Any]) -> bool:
     source = mark.get("source")
     mark_type = mark.get("markType")
     if source == "red-ink":
+        if mark_type in {"unknown", "check", "none"}:
+            return False
         if mark_type == "cross" and (mark.get("confidence") or 0) < 0.5:
             return False
         return True
@@ -357,7 +370,10 @@ def build_mistake_candidates(
                 continue
         candidate["judgement"] = _judgement_from_marks(mark_types)
         candidate["evidenceSummary"] = f"题号 {candidate.get('questionId')}{'(' + candidate.get('subQuestionId') + ')' if candidate.get('subQuestionId') else ''} 附近发现批改标记：{', '.join(mark_types)}。"
-        candidates.append(candidate)
+        # Below this threshold, fragmented red ticks and long correction
+        # strokes generate substantially more false positives than useful Xs.
+        if (candidate.get("confidence") or 0) >= 0.6:
+            candidates.append(candidate)
 
     return sorted(candidates, key=lambda item: ((item.get("bbox") or [0, 0, 0, 0])[1], (item.get("bbox") or [0, 0, 0, 0])[0]))
 

@@ -840,8 +840,8 @@ describe("simulated analyzer", () => {
     expect(prompt).toContain("There ____ a book on the desk.");
     expect(prompt).toContain("[10,20,300,60]");
     expect(prompt).toContain("优先用 OCR 文本校对题干");
-    expect(prompt).toContain("错题候选");
-    expect(prompt).toContain("必须逐个分析 mistakeCandidates");
+    expect(prompt).toContain("只允许分析和输出 mistakeCandidates 中列出的题号/小题号");
+    expect(prompt).toContain("不得脱离候选扫描整页新增错题");
     expect(prompt).toContain("partial");
     expect(prompt).not.toContain("RAW_SHOULD_BE_OMITTED");
   });
