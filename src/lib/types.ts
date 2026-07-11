@@ -92,6 +92,13 @@ export type PaperVisionMistakeCandidate = {
   evidenceSummary: string;
 };
 
+export type PaperVisionLayoutRegion = {
+  regionType: "student_id" | "subjective_question" | "fillin_question" | "objective_question" | "unknown";
+  bbox?: PaperVisionBox;
+  confidence?: number;
+  source?: "ocrautoscore-yolov8" | "unknown";
+};
+
 export type PaperVisionContext = {
   sourceImageIndex: number;
   engine: "ocr" | "autocut" | "vision" | "unknown";
@@ -100,12 +107,15 @@ export type PaperVisionContext = {
   rawText?: string;
   textBlocks: PaperVisionTextBlock[];
   questionCandidates: PaperVisionQuestionCandidate[];
+  layoutRegions?: PaperVisionLayoutRegion[];
+  pageRoleHint?: "answer_sheet" | "question" | "unknown";
   gradingMarks?: PaperVisionGradingMark[];
   mistakeCandidates?: PaperVisionMistakeCandidate[];
 };
 
 export type AnalysisOutput = {
   sourceImageIndex?: number;
+  answerSheetImageIndex?: number;
   subject: Subject;
   grade: Grade;
   questionType: string;

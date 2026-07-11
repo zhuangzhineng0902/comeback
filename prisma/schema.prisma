@@ -38,6 +38,10 @@ model Mistake {
   reviewStatus       String              @default("not_required")
   reviewNote         String?
   reviewedAt         DateTime?
+  contentStatus      String              @default("complete")
+  contentJson        String?
+  contentError       String?
+  contentUpdatedAt   DateTime?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   student            Student             @relation(fields: [studentId], references: [id])
@@ -160,6 +164,7 @@ model AnalysisJob {
   retryCount             Int           @default(0)
   errorMessage           String?
   paperVisionContextJson String?
+  relatedImagesJson      String?
   analysesJson           String?
   savedMistakesJson      String?
   startedAt              DateTime?

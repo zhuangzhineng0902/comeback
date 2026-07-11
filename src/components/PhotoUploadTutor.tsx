@@ -42,7 +42,7 @@ type AnalysisJobView = {
   id: string;
   imageIndex: number;
   filename: string;
-  status: "queued" | "processing" | "succeeded" | "failed";
+  status: "queued" | "processing" | "succeeded" | "failed" | "needs_review";
   retryCount: number;
   errorMessage?: string | null;
   image: UploadedImage;
@@ -65,6 +65,7 @@ type UploadedImage = {
   index: number;
   filename: string;
   url: string;
+  role?: "question" | "answer_sheet" | "unknown";
 };
 
 type ImageGroup = {
@@ -75,6 +76,7 @@ type ImageGroup = {
   status?: string;
   errorMessage?: string | null;
   jobId?: string;
+  role?: "question" | "answer_sheet" | "unknown";
 };
 
 type HistoryEntry = AnalyzeResponse & {
@@ -132,6 +134,7 @@ export function PhotoUploadTutor() {
   const [files, setFiles] = useState<File[]>([]);
   const [subjectHint, setSubjectHint] = useState<Subject | "">("");
   const [gradeHint, setGradeHint] = useState<Grade | "">("");
+  const [paperMode, setPaperMode] = useState<"independent_pages" | "question_pages_with_answer_sheet">("independent_pages");
   const [result, setResult] = useState<AnalyzeResponse | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: "assistant", content: defaultAssistantMessage }
@@ -205,6 +208,7 @@ export function PhotoUploadTutor() {
     if (gradeHint) {
       formData.append("gradeHint", gradeHint);
     }
+    formData.append("paperMode", paperMode);
 
     try {
       const response = await fetch("/api/analyze", {
@@ -280,6 +284,7 @@ export function PhotoUploadTutor() {
               image: result.uploadedImages?.[0],
               paperVisionContext: result.paperVisionContexts?.[0],
               analyses: result.analyses ?? [result.analysis],
+              role: result.uploadedImages?.[0]?.role,
               savedMistakes:
                 result.savedMistakes ?? [{ mistakeId: result.mistakeId, gapSeverity: result.gapSeverity }]
             }
@@ -400,6 +405,21 @@ export function PhotoUploadTutor() {
               />
             </label>
 
+            <label className="text-sm font-medium text-slate-700 md:col-span-3">
+              图片组合
+              <select
+                value={paperMode}
+                onChange={(event) => setPaperMode(event.target.value as "independent_pages" | "question_pages_with_answer_sheet")}
+                className="mt-2 h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-ink md:max-w-md"
+              >
+                <option value="independent_pages">逐张识别（每张图片独立判题）</option>
+                <option value="question_pages_with_answer_sheet">整卷识别（自动识别题目页和答题卡）</option>
+              </select>
+              <span className="mt-1 block text-xs font-normal text-slate-500">
+                不限制上传顺序，可混合上传多张题目页和答题卡；系统会自动识别页面角色并按题号对照作答。
+              </span>
+            </label>
+
             <label className="text-sm font-medium text-slate-700">
               学科
               <select
@@ -477,12 +497,16 @@ export function PhotoUploadTutor() {
                       ? "AI 处理中"
                       : job.status === "succeeded"
                         ? "AI 处理成功"
+                        : job.status === "needs_review"
+                          ? "待人工复核"
                         : "AI 处理失败";
                 const statusClassName =
                   job.status === "succeeded"
                     ? "border-emerald-200 bg-emerald-50 text-emerald-800"
                     : job.status === "failed"
                       ? "border-rose-200 bg-rose-50 text-rose-700"
+                      : job.status === "needs_review"
+                        ? "border-amber-200 bg-amber-50 text-amber-800"
                       : "border-sky-200 bg-sky-50 text-sky-800";
 
                 return (
@@ -532,7 +556,9 @@ export function PhotoUploadTutor() {
                         className="h-auto max-h-[420px] w-full object-contain"
                       />
                     </button>
-                    <p className="mt-2 text-xs text-slate-500">点击图片查看原图：{group.image.filename}</p>
+                    <p className="mt-2 text-xs text-slate-500">
+                      {group.role === "answer_sheet" ? "答题卡（错误标记与解析）" : group.role === "unknown" ? "页面角色待 AI 判断" : "作为参考"} · 点击图片查看原图：{group.image.filename}
+                    </p>
                     {group.paperVisionContext ? <PaperVisionPanel context={group.paperVisionContext} /> : null}
                   </div>
                 ) : null}
@@ -552,6 +578,10 @@ export function PhotoUploadTutor() {
                       </div>
                     ))}
                   </div>
+                ) : group.role === "answer_sheet" ? (
+                  <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">这张答题卡没有识别到能明确对应题号的错题。</p>
+                ) : group.role === "question" ? (
+                  <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">作为参考</p>
                 ) : (
                   <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
                     这张图片没有识别到明确错题。

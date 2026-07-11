@@ -42,6 +42,9 @@ function jobStatus(input: {
   if (input.status === "failed") {
     return { status: "failed", label: "AI 未解析成功" };
   }
+  if (input.status === "needs_review") {
+    return { status: "needs_review", label: "待人工复核" };
+  }
   if (input.status === "queued" || input.status === "processing") {
     return { status: input.status, label: input.status === "queued" ? "排队中" : "解析中" };
   }

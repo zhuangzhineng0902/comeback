@@ -18,6 +18,33 @@ function normalizeQuestionText(value: string) {
     .replace(/[，。！？；：、,.!?;:()[\]（）【】{}<>《》"'“”‘’]/g, "");
 }
 
+function questionTextBigrams(value: string) {
+  const normalized = normalizeQuestionText(value);
+  if (normalized.length < 2) return normalized ? [normalized] : [];
+  return Array.from({ length: normalized.length - 1 }, (_, index) => normalized.slice(index, index + 2));
+}
+
+export function questionTextSimilarity(left: string, right: string) {
+  const leftNormalized = normalizeQuestionText(left);
+  const rightNormalized = normalizeQuestionText(right);
+  if (leftNormalized === rightNormalized) return 1;
+  if (!leftNormalized || !rightNormalized) return 0;
+
+  const leftTokens = questionTextBigrams(left);
+  const rightTokens = questionTextBigrams(right);
+  const rightCounts = new Map<string, number>();
+  for (const token of rightTokens) rightCounts.set(token, (rightCounts.get(token) ?? 0) + 1);
+  let overlap = 0;
+  for (const token of leftTokens) {
+    const count = rightCounts.get(token) ?? 0;
+    if (count > 0) {
+      overlap += 1;
+      rightCounts.set(token, count - 1);
+    }
+  }
+  return (2 * overlap) / (leftTokens.length + rightTokens.length);
+}
+
 function reviewStateForAnalysis(analysis: AnalysisOutput) {
   const judgement = analysis.gradingEvidence?.judgement ?? "unknown";
   const needsManualReview =
@@ -174,13 +201,26 @@ export async function saveAnalysisAsMistake(input: SaveAnalysisInput) {
         grade: input.analysis.grade
       },
       include: {
-        mistakeArchetypes: true,
+        mistakeArchetypes: {
+          include: {
+            archetype: true
+          }
+        },
         tutorMessages: true
       }
     });
-    const duplicateMistake = existingMistakes.find(
+    const exactDuplicate = existingMistakes.find(
       (mistake) => normalizeQuestionText(mistake.recognizedText) === normalizedQuestion
     );
+    const reviewedDuplicate = existingMistakes
+      .filter((mistake) => mistake.reviewStatus === "confirmed_wrong" || mistake.reviewStatus === "not_wrong")
+      .filter((mistake) => mistake.mistakeArchetypes.some(
+        (relation) => relation.archetype.knowledgePointId === knowledgePoint.id
+      ))
+      .map((mistake) => ({ mistake, similarity: questionTextSimilarity(mistake.recognizedText, input.analysis.recognizedText) }))
+      .filter((item) => item.similarity >= 0.82)
+      .sort((left, right) => right.similarity - left.similarity)[0]?.mistake;
+    const duplicateMistake = exactDuplicate ?? reviewedDuplicate;
 
     if (duplicateMistake) {
       const existingGap = await tx.knowledgeGap.findUnique({
@@ -192,9 +232,25 @@ export async function saveAnalysisAsMistake(input: SaveAnalysisInput) {
         }
       });
 
-      if (existingGap) {
-        return { mistake: duplicateMistake, gap: existingGap, knowledgePoint, archetype };
-      }
+      return {
+        mistake: duplicateMistake,
+        gap: existingGap ?? {
+          id: "manual-review-no-gap",
+          studentId: input.studentId,
+          knowledgePointId: knowledgePoint.id,
+          errorCount: 0,
+          relatedMistakeCount: 0,
+          repeatedArchetypeCount: 0,
+          severity: "normal",
+          severityRank: 0,
+          typicalReasons: "[]",
+          lastOccurredAt: null,
+          masteryLevel: 0,
+          reviewSuggestion: "人工已确认不是错题。"
+        },
+        knowledgePoint,
+        archetype
+      };
     }
 
     const mistake = await tx.mistake.create({

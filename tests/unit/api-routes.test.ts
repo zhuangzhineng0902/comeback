@@ -332,6 +332,38 @@ describe("api routes", () => {
     expect(saveAnalysisAsMistakeMock).not.toHaveBeenCalled();
   });
 
+  it("creates one combined job when the final image is an answer sheet", async () => {
+    prismaMock.analysisBatch.create.mockResolvedValue({
+      id: "combined-batch",
+      status: "queued",
+      createdAt: new Date("2026-07-11T01:00:00.000Z"),
+      updatedAt: new Date("2026-07-11T01:00:00.000Z"),
+      jobs: [{ id: "combined-job", imageIndex: 0, status: "queued", retryCount: 0 }]
+    });
+    const { POST } = await import("@/app/api/analyze/route");
+    const formData = new FormData();
+    for (const [filename, bytes] of [["题目第1页.png", "question-one"], ["题目第2页.png", "question-two"], ["答题卡.png", "answer-sheet"]]) {
+      const file = new File([bytes], filename, { type: "image/png" });
+      Object.defineProperty(file, "arrayBuffer", { value: async () => new TextEncoder().encode(bytes).buffer });
+      formData.append("files", file);
+    }
+    formData.set("paperMode", "question_pages_with_answer_sheet");
+
+    const response = await POST({ formData: async () => formData } as Request);
+
+    expect(response.status).toBe(202);
+    expect(prismaMock.analysisBatch.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        total: 1,
+        jobs: expect.objectContaining({
+          create: expect.objectContaining({
+            relatedImagesJson: expect.stringContaining('"role":"unknown"')
+          })
+        })
+      })
+    }));
+  });
+
   it("returns an analysis batch with succeeded and failed job states", async () => {
     prismaMock.analysisBatch.findFirst.mockResolvedValue({
       id: "batch-1",

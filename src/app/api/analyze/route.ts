@@ -201,6 +201,9 @@ export async function POST(request: Request) {
   ].filter((value): value is File => value instanceof File);
   const subjectHint = formData.get("subjectHint");
   const gradeHint = formData.get("gradeHint");
+  const paperMode = formData.get("paperMode") === "question_pages_with_answer_sheet"
+    ? "question_pages_with_answer_sheet"
+    : "independent_pages";
 
   if (files.length === 0) {
     return NextResponse.json({ error: "请先上传至少一张试卷或习题照片。" }, { status: 400 });
@@ -208,6 +211,10 @@ export async function POST(request: Request) {
 
   if (files.length > maxUploadFiles) {
     return NextResponse.json({ error: "一次最多上传 16 张图片。" }, { status: 400 });
+  }
+
+  if (paperMode === "question_pages_with_answer_sheet" && files.length < 2) {
+    return NextResponse.json({ error: "整卷模式至少需要两张图片，系统会自动区分题目页和答题卡。" }, { status: 400 });
   }
 
   if (files.some((file) => !allowedImageTypes.has(file.type))) {
@@ -267,6 +274,55 @@ export async function POST(request: Request) {
       analysisImageBase64: analysisBytes.toString("base64"),
       analysisAbsoluteImagePath
     });
+  }
+
+  if (paperMode === "question_pages_with_answer_sheet") {
+    const primaryImage = uploadedImages[0];
+    const relatedImages = uploadedImages.map((image) => ({
+      filename: image.filename,
+      imagePath: image.imagePath,
+      analysisImagePath: image.analysisAbsoluteImagePath
+        ? storedUploadPath(path.basename(image.analysisAbsoluteImagePath))
+        : null,
+      analysisMimeType: image.analysisMimeType,
+      role: "unknown"
+    }));
+    const batch = await prisma.analysisBatch.create({
+      data: {
+        studentId: "default-student",
+        status: "queued",
+        total: 1,
+        jobs: {
+          create: {
+            studentId: "default-student",
+            imageIndex: 0,
+            filename: `${uploadedImages.length} 张混合试卷/答题卡`,
+            imagePath: primaryImage.imagePath,
+            analysisImagePath: primaryImage.analysisAbsoluteImagePath
+              ? storedUploadPath(path.basename(primaryImage.analysisAbsoluteImagePath))
+              : null,
+            analysisMimeType: primaryImage.analysisMimeType,
+            subjectHint: subject ?? null,
+            gradeHint: grade ?? null,
+            relatedImagesJson: JSON.stringify(relatedImages),
+            status: "queued"
+          }
+        }
+      },
+      include: { jobs: true }
+    });
+
+    triggerAnalysisWorker();
+    const job = batch.jobs[0];
+    return NextResponse.json({
+      mode: "queued",
+      batch: { id: batch.id, status: batch.status, total: 1, completed: 0, succeeded: 0, failed: 0, createdAt: batch.createdAt.toISOString(), updatedAt: batch.updatedAt.toISOString() },
+      jobs: [{
+        id: job.id, imageIndex: 0, filename: job.filename, status: job.status, retryCount: job.retryCount,
+        image: { index: 0, filename: primaryImage.filename, url: `/api/uploads/${encodeURIComponent(primaryImage.safeName)}` },
+        analyses: [], savedMistakes: []
+      }]
+    }, { status: 202 });
   }
 
   if (uploadedImages.length > 1) {

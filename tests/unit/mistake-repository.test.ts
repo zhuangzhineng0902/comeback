@@ -41,11 +41,12 @@ describe("mistake repository", () => {
   let prisma: typeof import("@/lib/db").prisma;
   let analyzeWithSimulation: typeof import("@/lib/analyzer/simulated").analyzeWithSimulation;
   let saveAnalysisAsMistake: typeof import("@/lib/repositories/mistakes").saveAnalysisAsMistake;
+  let updateMistakeManualReview: typeof import("@/lib/repositories/mistakes").updateMistakeManualReview;
 
   beforeAll(async () => {
     resetTestDatabase();
 
-    [{ prisma }, { analyzeWithSimulation }, { saveAnalysisAsMistake }] = await Promise.all([
+    [{ prisma }, { analyzeWithSimulation }, { saveAnalysisAsMistake, updateMistakeManualReview }] = await Promise.all([
       import("@/lib/db"),
       import("@/lib/analyzer/simulated"),
       import("@/lib/repositories/mistakes")
@@ -107,6 +108,60 @@ describe("mistake repository", () => {
     expect(duplicate.gap.errorCount).toBe(1);
     expect(duplicate.gap.repeatedArchetypeCount).toBe(1);
     expect(mistakeCount).toBe(1);
+  });
+
+  it("reuses a confirmed review when OCR recognizes the same question differently", async () => {
+    const analysis = await analyzeWithSimulation({ filename: "a.png", subjectHint: "数学", gradeHint: "八年级" });
+    const pendingAnalysis = {
+      ...analysis,
+      gradingEvidence: {
+        ...analysis.gradingEvidence!,
+        judgement: "suspected" as const,
+        needsConfirmation: true
+      }
+    };
+    const first = await saveAnalysisAsMistake({ studentId: "default-student", imagePath: "uploads/a.png", analysis: pendingAnalysis });
+    await updateMistakeManualReview({
+      mistakeId: first.mistake.id,
+      studentId: "default-student",
+      reviewStatus: "confirmed_wrong"
+    });
+
+    const duplicate = await saveAnalysisAsMistake({
+      studentId: "default-student",
+      imagePath: "uploads/b.png",
+      analysis: {
+        ...pendingAnalysis,
+        recognizedText: pendingAnalysis.recognizedText.replace("y = 2x - 3", "y=2x-3").replace("说明理由", "并说明理由")
+      }
+    });
+
+    expect(duplicate.mistake.id).toBe(first.mistake.id);
+    expect(duplicate.mistake.reviewStatus).toBe("confirmed_wrong");
+    expect(await prisma.mistake.count({ where: { studentId: "default-student" } })).toBe(1);
+  });
+
+  it("does not reopen a manually rejected question when it is recognized again", async () => {
+    const analysis = await analyzeWithSimulation({ filename: "a.png", subjectHint: "数学", gradeHint: "八年级" });
+    const first = await saveAnalysisAsMistake({ studentId: "default-student", imagePath: "uploads/a.png", analysis });
+    await updateMistakeManualReview({
+      mistakeId: first.mistake.id,
+      studentId: "default-student",
+      reviewStatus: "not_wrong"
+    });
+
+    const duplicate = await saveAnalysisAsMistake({
+      studentId: "default-student",
+      imagePath: "uploads/b.png",
+      analysis: {
+        ...analysis,
+        gradingEvidence: { ...analysis.gradingEvidence!, judgement: "suspected", needsConfirmation: true }
+      }
+    });
+
+    expect(duplicate.mistake.id).toBe(first.mistake.id);
+    expect(duplicate.mistake.reviewStatus).toBe("not_wrong");
+    expect(await prisma.mistake.count({ where: { studentId: "default-student" } })).toBe(1);
   });
 
   it("marks three mistakes on one knowledge point as important without repeated archetypes", async () => {

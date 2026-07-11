@@ -2,6 +2,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/db";
+import { enrichConfirmedMistake } from "@/lib/enrichment/confirmed-mistake";
 import { updateMistakeManualReview } from "@/lib/repositories/mistakes";
 
 const STUDENT_ID = "default-student";
@@ -53,6 +54,8 @@ export async function GET(request: Request) {
       reviewStatus: mistake.reviewStatus,
       reviewNote: mistake.reviewNote,
       reviewedAt: mistake.reviewedAt?.toISOString() ?? null,
+      contentStatus: mistake.contentStatus,
+      contentError: mistake.contentError,
       createdAt: mistake.createdAt.toISOString(),
       imageUrl: imageUrl(mistake.imagePath),
       archetypes: mistake.mistakeArchetypes.map((relation) => ({
@@ -89,13 +92,19 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "错题不存在。" }, { status: 404 });
   }
 
+  const enriched = reviewStatus === "confirmed_wrong"
+    ? await enrichConfirmedMistake(updated.id, STUDENT_ID)
+    : updated;
+
   return NextResponse.json({
     mistake: {
-      id: updated.id,
+      id: enriched?.id ?? updated.id,
       reviewStatus: updated.reviewStatus,
       needsManualReview: updated.needsManualReview,
       reviewNote: updated.reviewNote,
-      reviewedAt: updated.reviewedAt?.toISOString() ?? null
+      reviewedAt: updated.reviewedAt?.toISOString() ?? null,
+      contentStatus: enriched?.contentStatus ?? updated.contentStatus,
+      contentError: enriched?.contentError ?? updated.contentError
     }
   });
 }

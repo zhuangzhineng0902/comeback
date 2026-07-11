@@ -136,7 +136,7 @@ describe("review components", () => {
   it("renders mistake links and an empty state", () => {
     const { rerender } = render(<MistakeList mistakes={[]} />);
 
-    expect(screen.getByText("还没有错题。先去 AI 老师页面上传一张照片吧。")).toBeTruthy();
+    expect(screen.getByText("当前分类下还没有错题。先去 AI 老师页面上传一张照片吧。")).toBeTruthy();
 
     rerender(
       <MistakeList

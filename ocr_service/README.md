@@ -36,6 +36,21 @@ pip install paddlepaddle
 python3 ocr_service/app.py
 ```
 
+The service also loads `models/answer_sheet_layout.pt` from OCRAutoScore to
+locate answer-sheet regions before MiniMax interprets grading marks. Layout
+detection runs in an isolated subprocess so PyTorch does not share a process
+with PaddleOCR.
+
+Optional layout settings:
+
+```bash
+OCR_LAYOUT_ENABLED="true"
+OCR_LAYOUT_MODEL_PATH="/absolute/path/to/answer_sheet_layout.pt"
+OCR_LAYOUT_CONFIDENCE="0.25"
+OCR_LAYOUT_IMAGE_SIZE="640"
+OCR_LAYOUT_TIMEOUT_SECONDS="45"
+```
+
 Then set the Next.js app environment:
 
 ```bash

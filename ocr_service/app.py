@@ -6,6 +6,7 @@ from threading import Lock
 from flask import Flask, jsonify, request
 from PIL import Image
 
+from layout import detect_answer_sheet_layout, layout_detector_available
 from marks import detect_red_marks
 from normalization import normalize_paddle_result
 
@@ -53,7 +54,12 @@ def prepare_image_for_ocr(image: Image.Image) -> Image.Image:
 
 @app.get("/health")
 def health():
-    return jsonify({"ok": True, "service": "private-tutor-ocr", "engine": "paddleocr"})
+    return jsonify({
+        "ok": True,
+        "service": "private-tutor-ocr",
+        "engine": "paddleocr",
+        "layoutDetector": "ocrautoscore-yolov8" if layout_detector_available() else "disabled",
+    })
 
 
 @app.post("/ocr")
@@ -79,7 +85,15 @@ def ocr():
         app.logger.exception("OCR engine failed")
         return jsonify({"success": False, "error": f"ocr failed: {exc}"}), 500
 
+    try:
+        layout_regions = detect_answer_sheet_layout(image)
+    except Exception:
+        app.logger.exception("Answer-sheet layout detection failed; continuing with full-page OCR")
+        layout_regions = []
+
     payload = normalize_paddle_result(raw_result, grading_marks=detect_red_marks(image))
+    payload["layoutRegions"] = layout_regions
+    payload["pageRoleHint"] = "answer_sheet" if layout_regions else "unknown"
     payload["filename"] = uploaded.filename
     return jsonify(payload)
 

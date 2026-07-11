@@ -1,7 +1,9 @@
 "use client";
 
-import { CheckCircle2, RefreshCw, X, XCircle } from "lucide-react";
-import React, { useEffect, useState } from "react";
+import { CalendarClock, CheckCircle2, RefreshCw, X, XCircle } from "lucide-react";
+import React, { useCallback, useEffect, useState } from "react";
+
+import { formatDateTimeToMinute } from "@/lib/date-format";
 
 type ReviewMistake = {
   id: string;
@@ -14,6 +16,10 @@ type ReviewMistake = {
   mistakeReason: string;
   aiJudgement: string;
   reviewStatus: string;
+  createdAt: string;
+  reviewedAt: string | null;
+  contentStatus: string;
+  contentError?: string | null;
   imageUrl: string;
   archetypes: Array<{ id: string; title: string; knowledgePointName: string }>;
 };
@@ -39,13 +45,14 @@ export function ManualReviewPanel() {
   const [isLoading, setIsLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState("");
   const [error, setError] = useState("");
+  const [reviewFilter, setReviewFilter] = useState<"pending" | "reviewed">("pending");
   const [viewingImage, setViewingImage] = useState<{ url: string; alt: string } | null>(null);
 
-  async function loadMistakes() {
+  const loadMistakes = useCallback(async () => {
     setIsLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/review-mistakes?status=pending");
+      const response = await fetch(`/api/review-mistakes?status=${reviewFilter}`);
       const data = await readJson(response);
       if (!response.ok) {
         setError(typeof data.error === "string" ? data.error : "待复核错题加载失败。");
@@ -57,7 +64,7 @@ export function ManualReviewPanel() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [reviewFilter]);
 
   async function submitReview(mistakeId: string, reviewStatus: "confirmed_wrong" | "not_wrong") {
     setUpdatingId(mistakeId);
@@ -83,7 +90,7 @@ export function ManualReviewPanel() {
 
   useEffect(() => {
     void loadMistakes();
-  }, []);
+  }, [loadMistakes]);
 
   return (
     <div className="min-w-0 space-y-5">
@@ -106,6 +113,26 @@ export function ManualReviewPanel() {
           </button>
         </div>
         {error ? <p className="mt-3 text-sm text-rose-600">{error}</p> : null}
+        <div className="mt-4 inline-flex w-full rounded-md border border-slate-300 bg-slate-50 p-1 sm:w-auto" role="tablist" aria-label="复核状态">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={reviewFilter === "pending"}
+            onClick={() => setReviewFilter("pending")}
+            className={`h-9 flex-1 rounded px-4 text-sm font-medium transition sm:flex-none ${reviewFilter === "pending" ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:text-ink"}`}
+          >
+            待处理
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={reviewFilter === "reviewed"}
+            onClick={() => setReviewFilter("reviewed")}
+            className={`h-9 flex-1 rounded px-4 text-sm font-medium transition sm:flex-none ${reviewFilter === "reviewed" ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:text-ink"}`}
+          >
+            已处理
+          </button>
+        </div>
       </section>
 
       {isLoading ? (
@@ -116,7 +143,7 @@ export function ManualReviewPanel() {
 
       {!isLoading && mistakes.length === 0 ? (
         <p className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600 shadow-sm">
-          当前没有待人工复核的题目。
+          {reviewFilter === "pending" ? "当前没有待人工复核的题目。" : "当前没有已处理的复核记录。"}
         </p>
       ) : null}
 
@@ -147,11 +174,29 @@ export function ManualReviewPanel() {
                   <span className="rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-orange-800">
                     AI：{judgementLabels[mistake.aiJudgement] ?? judgementLabels.unknown}
                   </span>
+                  {reviewFilter === "reviewed" ? (
+                    <>
+                      <span className={`rounded-md border px-2 py-1 ${mistake.reviewStatus === "confirmed_wrong" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                        {mistake.reviewStatus === "confirmed_wrong" ? "已确认为错题" : "已标记非错题"}
+                      </span>
+                      {mistake.reviewStatus === "confirmed_wrong" ? (
+                        <span className={`rounded-md border px-2 py-1 ${mistake.contentStatus === "complete" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : mistake.contentStatus === "failed" ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                          {mistake.contentStatus === "complete" ? "解析已完整" : mistake.contentStatus === "failed" ? "补全失败" : "解析补全中"}
+                        </span>
+                      ) : null}
+                    </>
+                  ) : null}
                   {mistake.archetypes.slice(0, 2).map((archetype) => (
                     <span key={archetype.id}>{archetype.knowledgePointName}</span>
                   ))}
                 </div>
                 <h2 className="mt-2 break-words text-lg font-semibold text-ink">{mistake.questionType}</h2>
+                <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
+                  <CalendarClock aria-hidden="true" size={15} />
+                  {reviewFilter === "reviewed" && mistake.reviewedAt
+                    ? `处理时间：${formatDateTimeToMinute(mistake.reviewedAt)}`
+                    : `进入复核：${formatDateTimeToMinute(mistake.createdAt)}`}
+                </p>
                 <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{mistake.recognizedText}</p>
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -169,7 +214,7 @@ export function ManualReviewPanel() {
                   AI 错因：{mistake.mistakeReason}
                 </p>
 
-                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                {reviewFilter === "pending" ? <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                   <button
                     type="button"
                     onClick={() => submitReview(mistake.id, "confirmed_wrong")}
@@ -188,7 +233,7 @@ export function ManualReviewPanel() {
                     <XCircle aria-hidden="true" size={18} />
                     不是错题
                   </button>
-                </div>
+                </div> : null}
               </div>
             </div>
           </article>

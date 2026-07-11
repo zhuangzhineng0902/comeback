@@ -71,6 +71,7 @@ const gradingEvidenceSchema = z.object({
 
 const baseAnalysisSchema = z.object({
   sourceImageIndex: z.number().int().min(0).max(15).optional(),
+  answerSheetImageIndex: z.number().int().min(0).max(15).optional(),
   subject: z.enum(subjects),
   grade: z.enum(grades),
   questionType: z.string().min(1),
@@ -99,6 +100,18 @@ const analysisSchema = baseAnalysisSchema.extend({
 
 const analysesSchema = z.object({
   analyses: z.array(analysisSchema).min(1).max(30)
+});
+
+const answerSheetDetectionSchema = z.object({
+  candidates: z.array(z.object({
+    answerSheetImageIndex: z.number().int().min(0).max(15),
+    questionId: z.string().min(1),
+    subQuestionId: z.string().min(1).optional(),
+    markType: z.enum(["cross", "partial", "deduction"]),
+    deductedScore: z.number().min(0).optional(),
+    confidence: z.number().min(0).max(1),
+    evidenceSummary: z.string().min(1)
+  })).max(40)
 });
 
 type MiniMaxResponse = {
@@ -232,12 +245,21 @@ function formatPaperVisionContexts(input: AnalyzeInput) {
       judgement: candidate.judgement,
       evidenceSummary: candidate.evidenceSummary
     })) ?? [];
+    const layoutRegions = context.layoutRegions?.slice(0, 30).map((region, index) => ({
+      index: index + 1,
+      regionType: region.regionType,
+      bbox: formatBox(region.bbox),
+      confidence: region.confidence,
+      source: region.source
+    })) ?? [];
 
     return {
       sourceImageIndex: context.sourceImageIndex,
       engine: context.engine,
       status: context.status,
       summary: context.summary,
+      pageRoleHint: context.pageRoleHint,
+      layoutRegions,
       textBlocks,
       questionCandidates,
       gradingMarks,
@@ -246,7 +268,7 @@ function formatPaperVisionContexts(input: AnalyzeInput) {
   });
 
   return [
-    "OCR 前置识别结果如下，这是给你定位题号、题干、学生答案区域和版面的紧凑证据层。",
+    "OCR 前置识别结果如下，这是给你定位题号、题干、学生答案区域和版面的紧凑证据层；layoutRegions 是 OCRAutoScore YOLO 检出的答题卡作答区域。",
     "请优先用 OCR 文本校对题干、题号、选项和普通印刷文字；同时必须继续查看原图来识别手写答案、批改符号、涂改痕迹和公式细节。",
     "如果存在 mistakeCandidates（错题候选），必须逐个分析 mistakeCandidates；除非原图能明确证明候选是全对，否则每个候选都要在 analyses 中输出一项。",
     "mistakeCandidates 来自题号、红笔批改标记和空间位置匹配；填空题、解答题、小题候选也必须覆盖，不要只返回选择题或第一题。",
@@ -258,16 +280,25 @@ function formatPaperVisionContexts(input: AnalyzeInput) {
 
 function buildPrompt(input: AnalyzeInput) {
   const paperVisionContext = formatPaperVisionContexts(input);
+  const targetQuestionInstruction = input.targetQuestion
+    ? `本次只分析一道已经由程序完成题号配对的错题：题号=${input.targetQuestion.questionId}${input.targetQuestion.subQuestionId ? `，小题=${input.targetQuestion.subQuestionId}` : ""}，题目页原始索引=${input.targetQuestion.questionImageIndex}，答题卡原始索引=${input.targetQuestion.answerSheetImageIndex}。题干 OCR=${input.targetQuestion.questionText ?? "未完整识别，请查看第1张图"}。答题卡证据=${input.targetQuestion.answerEvidence}。输入图片第1张是题目页，第2张是对应答题卡。只输出这一道题；sourceImageIndex 必须填 ${input.targetQuestion.questionImageIndex}，answerSheetImageIndex 必须填 ${input.targetQuestion.answerSheetImageIndex}。如果答题卡证据不足以确认错误，analyses 返回空数组。`
+    : "";
+  const answerSheetInstruction = input.paperLayout === "question_pages_with_answer_sheet"
+    ? `这是一组混合上传的试卷页和答题卡，上传顺序不代表页面角色。OCR 初判的页面角色为：${(input.pageRoles ?? []).map((role, index) => `第${index + 1}张=${role === "question" ? "题目页" : role === "answer_sheet" ? "答题卡" : "待判断"}`).join("；")}。你必须结合原图自行复核角色，把答题卡上的作答、涂改和老师批改标记与题目页按题号逐一对照。判错证据唯一可信源是答题卡：题目页中的所有手写、勾叉、颜色、OCR teacherMark、gradingMarks 和 mistakeCandidates 都不得作为批改或作答证据。只有答题卡能清晰对应题号且批改/作答证据明确时才输出错题；无法对应、标记不清或证据矛盾时直接跳过，不猜测、不补全。每个输出必须同时给 sourceImageIndex（题目页索引）和 answerSheetImageIndex（对应答题卡索引）；两者无法明确时不得输出该题。analyses 只可输出题目页中的错题，绝不能把答题卡作为 sourceImageIndex。`
+    : "";
   return [
     "你是一个只服务初中学生学习的私人教师 Agent。",
     "请分析图片中的错题或习题照片，输出严格 JSON，不要输出 Markdown，不要输出解释性前后缀。",
     input.analysisDetail === "compact"
       ? "当前是多页批量分析模式：每道错题讲解必须紧凑，practiceQuestions 只给 1 道，walkthrough 只给 2 步，illustration.nodes 最多 3 个。"
       : "",
+    answerSheetInstruction,
+    targetQuestionInstruction,
     "如果图片是一整张试卷或多页试卷，请找出所有能识别出的错题；每一道错题都要单独分析，不要只分析第一题。",
     "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
-    "analyses 每个元素必须完全符合字段：sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
+    "analyses 每个元素必须完全符合字段：sourceImageIndex, answerSheetImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
     "sourceImageIndex 表示这道错题来自第几张上传图片，图片索引从 0 开始；无法判断时填 0。",
+    input.paperLayout === "question_pages_with_answer_sheet" ? "answerSheetImageIndex 表示这道错题对应的答题卡图片索引，必须指向答题卡；无法确定时不要输出该题。" : "",
     "subject 必须是：语文、数学、英语、物理、化学、生物、历史、地理、道德与法治之一。",
     "grade 必须是：七年级、八年级、九年级之一。",
     "knowledgePoints 至少 1 个，confidence 是 0 到 1 的数字。",
@@ -302,14 +333,18 @@ function buildPrompt(input: AnalyzeInput) {
 
 function buildRepairPrompt(content: string, input: AnalyzeInput) {
   const paperVisionContext = formatPaperVisionContexts(input);
+  const answerSheetInstruction = input.paperLayout === "question_pages_with_answer_sheet"
+    ? "这组图片混有题目页和答题卡，上传顺序无意义；请自行复核页面角色。只可用答题卡上的作答和批改作为判错证据，题目页标记一律忽略；无法按题号明确对应时跳过，不猜测。只输出题目页的错题，不能把答题卡作为 sourceImageIndex。"
+    : "";
   return [
     "请把下面这段错题分析内容转换成严格 JSON。",
     "只输出 JSON 对象，不要 Markdown，不要 <think>，不要解释。",
     "不要修补原文字符，请根据原始内容重新生成完整 JSON 对象。",
+    answerSheetInstruction,
     "所有 JSON 属性名必须使用英文双引号，所有字符串也必须使用英文双引号。",
     "禁止输出 JavaScript 对象、单引号、尾随逗号、注释或任何 JSON 之外的文字。",
     "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
-    "analyses 每个元素字段必须是：sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
+    "analyses 每个元素字段必须是：sourceImageIndex, answerSheetImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
     "sourceImageIndex 表示这道错题来自第几张上传图片，图片索引从 0 开始；无法判断时填 0。",
     "subject 必须是：语文、数学、英语、物理、化学、生物、历史、地理、道德与法治之一。",
     "grade 必须是：七年级、八年级、九年级之一。",
@@ -341,12 +376,16 @@ function buildRepairPrompt(content: string, input: AnalyzeInput) {
 
 function buildCompactRepairPrompt(content: string, input: AnalyzeInput) {
   const paperVisionContext = formatPaperVisionContexts(input);
+  const answerSheetInstruction = input.paperLayout === "question_pages_with_answer_sheet"
+    ? "这组图片混有题目页和答题卡，上传顺序无意义；自行复核页面角色。只可用答题卡上的作答和批改作为判错证据，题目页标记一律忽略；无法明确对应就跳过。按题号对照，sourceImageIndex 只能指向题目页。"
+    : "";
   return [
     "请重新生成严格、紧凑 JSON，只输出 JSON 对象。",
     "不要 Markdown，不要 <think>，不要解释，不要扩写讲解。",
+    answerSheetInstruction,
     "顶层必须是 {\"analyses\":[...]}，每道错题一个元素。",
     "如果原内容格式损坏，请保留能确定的信息，缺失项用简短但有效的学习分析补齐。",
-    "每个元素必须包含 sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
+    "每个元素必须包含 sourceImageIndex, answerSheetImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
     "subject 只能是语文、数学、英语、物理、化学、生物、历史、地理、道德与法治；grade 只能是七年级、八年级、九年级。",
     "knowledgePoints 至少 1 个；practiceQuestions 只给 1 道；richExplanation.walkthrough 只给 2 步；illustration.nodes 最多 3 个。",
     "studentFriendlyExplanation 必须保留完整思路：读题条件、选法原因、关键步骤、错因和检查方法都要交代，保持紧凑但不能只有一句提醒。",
@@ -361,9 +400,13 @@ function buildCompactRepairPrompt(content: string, input: AnalyzeInput) {
 
 function buildOcrOnlyPrompt(input: AnalyzeInput) {
   const paperVisionContext = formatPaperVisionContexts(input);
+  const answerSheetInstruction = input.paperLayout === "question_pages_with_answer_sheet"
+    ? "这组图片混有题目页和答题卡，上传顺序无意义；自行复核页面角色。只可用答题卡上的作答和批改作为判错证据，题目页标记一律忽略；无法明确对应就跳过。按题号对照，只输出题目页的错题。"
+    : "";
   return [
     "OCR-only 真实 AI 分析模式。",
     "上一次图片视觉分析请求超时。请不要再请求或等待图片视觉识别，只根据 OCR 证据层、题号候选、文字块坐标和用户提示生成严格 JSON。",
+    answerSheetInstruction,
     "如果 OCR 证据不足以确定某一道题是否错了，可以输出 suspected，并设置 gradingEvidence.needsConfirmation 为 true。",
     "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
     "每个元素必须包含 sourceImageIndex, subject, grade, questionType, recognizedText, studentAnswer, correctAnswer, knowledgePoints, mistakeReason, studentFriendlyExplanation, example, archetype, practiceQuestions, richExplanation, gradingEvidence。",
@@ -1093,4 +1136,42 @@ export async function analyzeWithMiniMax(input: AnalyzeInput): Promise<AnalysisO
   }
 
   return analyses;
+}
+
+export async function detectAnswerSheetMistakesWithMiniMax(input: {
+  images: Array<{ originalIndex: number; filename: string; mimeType: string; imageBase64: string; part?: string }>;
+}) {
+  const apiKey = process.env.MINIMAX_API_KEY;
+  if (!apiKey || input.images.length === 0) return [];
+  const baseUrl = (process.env.MINIMAX_BASE_URL ?? defaultMiniMaxBaseUrl).replace(/\/+$/, "");
+  const content = await postMiniMax({
+    baseUrl,
+    apiKey,
+    body: {
+      model: process.env.MINIMAX_MODEL ?? defaultModel,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "你只负责识别答题卡上的老师批改结果，不解题，不看题目页。",
+              "逐张、逐栏、逐题扫描所有印刷题号，找出所有明确有红叉、半叉、半勾或红色扣分数字的题号；勾号和没有批改的题不要输出。",
+              "题号必须来自答题卡印刷题号。扣6分、扣8分等数字要写入 deductedScore；半叉、半勾用 partial。",
+              "只认老师的红色批改，不要把学生的黑色或蓝色书写、划线、改写当成红叉或扣分。",
+              "无法确定题号或批改含义时不要猜测，不输出该项。",
+              `图片顺序与来源：${input.images.map((image, index) => `第${index + 1}张=原始索引${image.originalIndex}的${image.part ?? "整页"}`).join("；")}。同一原图可能被分区展示，结果要按题号去重；answerSheetImageIndex 必须填写对应原始索引。`,
+              "只输出严格 JSON：{\"candidates\":[{\"answerSheetImageIndex\":0,\"questionId\":\"10\",\"markType\":\"deduction\",\"deductedScore\":6,\"confidence\":0.9,\"evidenceSummary\":\"第10题有红叉并扣6分\"}]}"
+            ].join("\n")
+          },
+          ...input.images.map((image) => ({ type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.imageBase64}` } }))
+        ]
+      }],
+      thinking: { type: "disabled" },
+      response_format: { type: "json_object" },
+      temperature: 0,
+      max_completion_tokens: 3000
+    }
+  });
+  return answerSheetDetectionSchema.parse(parseJsonObject(content)).candidates;
 }

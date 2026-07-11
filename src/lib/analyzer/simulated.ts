@@ -9,6 +9,16 @@ export type AnalyzeInput = {
     mimeType: string;
     imageBase64: string;
   }>;
+  paperLayout?: "independent_pages" | "question_pages_with_answer_sheet";
+  pageRoles?: Array<"question" | "answer_sheet" | "unknown">;
+  targetQuestion?: {
+    questionId: string;
+    subQuestionId?: string;
+    questionImageIndex: number;
+    answerSheetImageIndex: number;
+    questionText?: string;
+    answerEvidence: string;
+  };
   paperVisionContexts?: PaperVisionContext[];
   subjectHint?: Subject;
   gradeHint?: Grade;

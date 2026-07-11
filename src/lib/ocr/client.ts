@@ -3,6 +3,7 @@ import type {
   MistakeJudgement,
   PaperVisionBox,
   PaperVisionContext,
+  PaperVisionLayoutRegion,
   PaperVisionGradingMark,
   PaperVisionMistakeCandidate,
   PaperVisionQuestionCandidate,
@@ -150,6 +151,23 @@ function normalizeGradingMark(value: unknown): PaperVisionGradingMark | null {
   };
 }
 
+function normalizeLayoutRegion(value: unknown): PaperVisionLayoutRegion | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const regionType = record.regionType ?? record.type ?? record.className;
+  const allowedTypes = ["student_id", "subjective_question", "fillin_question", "objective_question"] as const;
+  return {
+    regionType: typeof regionType === "string" && (allowedTypes as readonly string[]).includes(regionType)
+      ? regionType as PaperVisionLayoutRegion["regionType"]
+      : "unknown",
+    bbox: normalizeBox(record.bbox ?? record.box ?? record.position),
+    confidence: normalizeNumber(record.confidence ?? record.score ?? record.probability),
+    source: record.source === "ocrautoscore-yolov8" ? "ocrautoscore-yolov8" : "unknown"
+  };
+}
+
 function normalizeMistakeCandidate(value: unknown): PaperVisionMistakeCandidate | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -257,6 +275,7 @@ function buildFailedContext(input: OcrInput, error: unknown): PaperVisionContext
     summary: `OCR 预处理失败，已改用原图视觉分析。${detail}`,
     textBlocks: [],
     questionCandidates: [],
+    layoutRegions: [],
     gradingMarks: [],
     mistakeCandidates: []
   };
@@ -269,6 +288,8 @@ function normalizeOcrPayload(payload: unknown, input: OcrInput): PaperVisionCont
   const questionCandidates = extractQuestionCandidates(record);
   const gradingMarks = extractArray(record, ["gradingMarks", "marks", "teacherMarks"], normalizeGradingMark);
   const mistakeCandidates = extractArray(record, ["mistakeCandidates", "wrongQuestionCandidates"], normalizeMistakeCandidate);
+  const layoutRegions = extractArray(record, ["layoutRegions", "answerRegions"], normalizeLayoutRegion);
+  const pageRoleHint = record.pageRoleHint;
 
   return {
     sourceImageIndex: input.sourceImageIndex,
@@ -278,6 +299,8 @@ function normalizeOcrPayload(payload: unknown, input: OcrInput): PaperVisionCont
     rawText,
     textBlocks: blocks.slice(0, 80),
     questionCandidates: questionCandidates.slice(0, 40),
+    layoutRegions: layoutRegions.slice(0, 30),
+    pageRoleHint: pageRoleHint === "answer_sheet" || pageRoleHint === "question" ? pageRoleHint : "unknown",
     gradingMarks: gradingMarks.slice(0, 80),
     mistakeCandidates: mistakeCandidates.slice(0, 40)
   };

@@ -21,6 +21,21 @@ function uploadedImageUrl(imagePath: string) {
   return `/api/uploads/${encodeURIComponent(path.basename(imagePath))}`;
 }
 
+type ContentDetails = {
+  knowledgePoints?: string[];
+  solutionStrategy?: string;
+  examples?: Array<{ label: string; sourceTitle?: string; sourceUrl?: string; question: string; answer: string; explanation: string }>;
+};
+
+function parseContentDetails(value: string | null): ContentDetails | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as ContentDetails;
+  } catch {
+    return null;
+  }
+}
+
 export default async function MistakeDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const mistake = await prisma.mistake.findFirst({
@@ -36,6 +51,7 @@ export default async function MistakeDetailPage({ params }: { params: Promise<{ 
   }
 
   const originalFilename = path.basename(mistake.imagePath);
+  const contentDetails = parseContentDetails(mistake.contentJson);
 
   return (
     <article className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-5">
@@ -64,6 +80,39 @@ export default async function MistakeDetailPage({ params }: { params: Promise<{ 
 
         <h2 className="mt-5 text-sm font-semibold text-ink">讲解</h2>
         <p className="mt-2 text-sm leading-6 text-slate-700">{mistake.explanation}</p>
+
+        {contentDetails?.solutionStrategy ? (
+          <>
+            <h2 className="mt-5 text-sm font-semibold text-ink">通用解题套路</h2>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{contentDetails.solutionStrategy}</p>
+          </>
+        ) : null}
+
+        {contentDetails?.knowledgePoints?.length ? (
+          <div className="mt-5">
+            <h2 className="text-sm font-semibold text-ink">相关知识点</h2>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {contentDetails.knowledgePoints.map((point) => <span key={point} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-sm text-slate-700">{point}</span>)}
+            </div>
+          </div>
+        ) : null}
+
+        {contentDetails?.examples?.length ? (
+          <div className="mt-5">
+            <h2 className="text-sm font-semibold text-ink">母题与深圳题型</h2>
+            <div className="mt-3 space-y-3">
+              {contentDetails.examples.map((example, index) => (
+                <div key={`${example.label}-${index}`} className="rounded-md border border-slate-200 p-3 text-sm">
+                  <p className="font-medium text-ink">{example.label}</p>
+                  {example.sourceTitle && example.sourceUrl ? <a className="mt-1 block text-teal-700 underline" href={example.sourceUrl} target="_blank" rel="noreferrer">来源：{example.sourceTitle}</a> : null}
+                  <p className="mt-2 leading-6 text-slate-700">{example.question}</p>
+                  <p className="mt-2 leading-6 text-emerald-800">答案：{example.answer}</p>
+                  <p className="mt-1 leading-6 text-slate-600">{example.explanation}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <aside className="min-w-0 space-y-4">
