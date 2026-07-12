@@ -1,20 +1,23 @@
 # Private Tutor Agent
 
-单个孩子使用的初中全学科私人教师 Web Agent。当前版本支持上传试卷/习题照片，结合本地 OCR 服务和 MiniMax 国内站 API 识别错题、讲解知识点、沉淀错题本、知识漏洞和期末知识树。
+单个孩子使用的初中全学科私人教师 Web Agent。系统面向孩子错题整理：上传试卷或习题照片后，先做本地 OCR 和批改痕迹识别，再调用 MiniMax 中国国内站 API 判断错题、生成孩子能理解的讲解、沉淀错题本、知识漏洞、母题和期末知识树。
 
 ## 当前能力
 
-- 面向单个孩子，默认学生 ID 为 `default-student`。
+- 单个孩子版本，默认学生 ID 为 `default-student`。
 - 支持初中全学科：语文、数学、英语、物理、化学、生物、历史、地理、道德与法治。
-- 支持上传 JPG、PNG、WebP、HEIC/HEIF 图片，单张最大 8MB，一次最多 16 张。
-- 学科和年级可以不选，AI 会根据图片文字、题型和章节自动判断。
-- OCR 前置识别题干、题号、文字块、红笔批改痕迹和疑似错题候选。
-- MiniMax 负责最终错题判断、解题讲解、知识漏洞、母题、练习题、深圳题型风格例题。
-- 错题保存后会更新知识漏洞；相同题目重复提交不会重复叠加错误次数。
-- 同一母题多次出错会标记为高频母题漏洞。
-- AI 追问有学习范围限制，会拦截游戏、娱乐视频、闲聊和绕过规则类请求。
-- 首页显示 AI 分析历史和对话历史。
-- 错题本详情页展示错题解析、母题、追问记录。
+- 支持 JPG、PNG、WebP、HEIC/HEIF，单张最大 8MB，一次最多 16 张。
+- 学科、年级可以不选，AI 根据图片内容自动识别。
+- 支持两种试卷模式：
+  - `independent_pages`：逐张图片独立判题。
+  - `question_pages_with_answer_sheet`：整卷识别，自动区分题目页和答题卡，并把答题卡错题匹配回题目页。
+- 多图和整卷模式走异步任务队列，上传历史能看到每页 AI 是否成功、是否待复核，并支持批量重试。
+- OCR 前置识别文字块、题号、版面区域、红笔批改、YOLO 批改标记和疑似错题候选。
+- MiniMax 负责最终错题判断、深入浅出讲解、知识漏洞、母题、例题和深圳题型风格练习。
+- 同一张卷子反复提交时，同一错题不会重复叠加错误次数。
+- 同类母题多次出错会在知识漏洞和期末知识树中重点标记。
+- 错题详情、知识漏洞详情、知识树详情都能下钻到知识点解释，并关联原始上传图片和错题。
+- AI 对话有学习范围限制，会拦截游戏、娱乐视频、闲聊和绕过规则类请求。
 
 ## 技术栈
 
@@ -22,224 +25,287 @@
 - 数据库: SQLite + Prisma
 - AI: MiniMax Chat Completions API
 - OCR: Flask + PaddleOCR + Pillow
-- 批改痕迹识别: OCR 文本块、红笔像素检测、题号/小问空间绑定
+- 批改与答题卡视觉: YOLO26n + SAHI, OCRAutoScore YOLO, 红笔像素 fallback
 
-## 代码处理流程
+## 试卷处理过程
+
+```mermaid
+flowchart TD
+  A["用户上传 1 到 16 张图片"] --> B["POST /api/analyze 校验类型、大小、paperMode"]
+  B --> C["保存原图到 UPLOAD_ROOT_DIR，并生成 analysis.jpg"]
+  C --> D{"处理模式"}
+
+  D -->|"单张 independent_pages"| E["同步 OCR 预处理"]
+  E --> F["构建错题候选裁剪图"]
+  F --> G["MiniMax 深度分析"]
+
+  D -->|"多张 independent_pages"| H["创建 AnalysisBatch"]
+  H --> I["每张图创建一个 AnalysisJob"]
+  I --> J["后台 Worker 并发处理"]
+
+  D -->|"question_pages_with_answer_sheet"| K["创建一个复合 AnalysisJob"]
+  K --> L["relatedImagesJson 记录题目页和答题卡"]
+  L --> J
+
+  J --> M["加载 analysis 图和原图"]
+  M --> N["调用本地 OCR 服务"]
+  N --> O["PaddleOCR 文字识别"]
+  N --> P["YOLO26n/红笔规则识别批改标记"]
+  N --> Q["OCRAutoScore YOLO 识别答题卡区域"]
+  O --> R["归一化为 PaperVisionContext"]
+  P --> R
+  Q --> R
+
+  R --> S{"是否整卷答题卡模式"}
+  S -->|"否"| T["每页调用 MiniMax 判错和讲解"]
+  S -->|"是"| U["分类题目页和答题卡"]
+  U --> V["MiniMax 只检测答题卡错题标记"]
+  V --> W["把答题卡错题匹配回题目页"]
+  W --> X["按单题调用 MiniMax 生成讲解"]
+
+  G --> Y["保存 Mistake、KnowledgePoint、Archetype、KnowledgeGap"]
+  T --> Y
+  X --> Y
+  Y --> Z["前端展示错题、原图、知识漏洞、期末知识树"]
+  J --> AA["任务状态：queued/processing/succeeded/failed/needs_review"]
+  AA --> AB["上传历史支持筛选、批量重试、人工复核"]
+```
+
+## 核心处理链路
 
 ### 1. 前端上传
 
 入口组件：`src/components/PhotoUploadTutor.tsx`
 
 1. 用户选择 1 到 16 张图片。
-2. 前端把图片放入 `FormData` 的 `files` 字段。
-3. 可选传入 `subjectHint` 和 `gradeHint`；不选时后端交给 AI 自动识别。
+2. 前端用 `FormData` 的 `files` 字段提交图片。
+3. 可选提交 `subjectHint`、`gradeHint`、`paperMode`。
 4. 请求 `POST /api/analyze`。
-5. 返回成功后，前端按图片分组显示：
-   - 原始上传图片缩略图，点击可看原图。
-   - OCR 证据摘要。
-   - 每道错题的解析卡片。
-   - 当前分析结果和历史记录。
+5. 单图同步返回解析结果；多图或整卷返回 `202` 和 `AnalysisBatch`，前端轮询 `/api/analysis-batches/[id]`。
+6. 页面按图片分组展示原图、OCR 摘要、错题解析、任务状态和重试入口。
 
-当前上传处理是同步请求：前端会等待 `/api/analyze` 完成后一次性展示结果。当前代码没有异步任务队列和批量重试接口。
-
-### 2. 上传 API 校验与落盘
+### 2. 上传校验、落盘和分析图生成
 
 入口：`src/app/api/analyze/route.ts`
 
-处理步骤：
+1. 校验文件数量、类型和大小。
+2. 原图保存到 `getUploadRootDir()`：
+   - 默认是项目根目录下的 `uploads/`。
+   - 如果设置 `UPLOAD_ROOT_DIR`，则保存到该目录。
+3. 数据库里存储的是 `uploads/<filename>` 形式的相对路径。
+4. 非测试环境会用 macOS `sips` 生成 `*-analysis.jpg`：
+   - 默认最长边 `1600`。
+   - 默认 JPEG 质量 `75`。
+   - 可用 `ANALYSIS_IMAGE_MAX_DIMENSION` 和 `ANALYSIS_IMAGE_QUALITY` 调整。
+5. HEIC/HEIF 也会转换成 JPEG 分析图；转换失败时会提示改用 JPG、PNG 或 WebP。
 
-1. 校验文件数量：必须至少 1 张，最多 16 张。
-2. 校验文件类型：只允许 `image/jpeg`、`image/png`、`image/webp`、`image/heic`、`image/heif`。
-3. 校验单张大小：最大 8MB。
-4. 保存原始图片到 `uploads/`：
-   - 文件名格式：`<uuid>-<清洗后的原文件名>`
-   - 中文字符会被清洗成 `_`，例如 `英语试卷_1.JPG` 可能变成 `____1.JPG`。
-5. HEIC/HEIF 会用 macOS `sips` 转成 JPEG 分析图：
-   - 路径形如 `uploads/<uuid>-<name>-analysis.jpg`
-   - JPG、PNG、WebP 当前直接使用原图参与 OCR 和 AI 分析。
+图片访问入口：`src/app/api/uploads/[filename]/route.ts`。该接口通过 `resolveStoredUploadPath()` 从 `UPLOAD_ROOT_DIR` 或默认 `uploads/` 读取文件。
 
-如果后续分析或持久化失败，当前 API 会删除本次刚上传的图片文件，避免留下无效文件。
+### 3. 单图同步分析
 
-### 3. OCR 前置识别
+单张 `independent_pages` 仍走同步路径：
 
-Web OCR 客户端：`src/lib/ocr/client.ts`
+1. 调用 `analyzeImageWithOcr()` 做 OCR 预处理。
+2. 根据 OCR 的 `mistakeCandidates` 用 `sharp` 裁剪最多 8 张候选区域图。
+3. 把整页分析图、候选裁剪图、OCR 证据层一起传给 MiniMax。
+4. 保存分析结果到错题本、知识漏洞和母题。
+5. 返回 `imageGroups`，前端立即展示。
 
-OCR 服务：`ocr_service/app.py`
+### 4. 多图异步分析
 
-处理步骤：
+多张 `independent_pages` 会创建：
 
-1. Web 端把图片 base64 还原为二进制，使用 multipart 字段 `image` 调用 `OCR_SERVICE_URL`。
-2. OCR 服务用 Pillow 打开图片，并按 `OCR_MAX_SIDE` 缩放，默认最长边 1800。
-3. PaddleOCR 识别文字、坐标和置信度。
-4. `ocr_service/marks.py` 扫描红色像素块，提取红笔批改标记。
-5. `ocr_service/normalization.py` 归一化结果：
-   - `textBlocks`: OCR 文字块。
-   - `questionCandidates`: 题号候选。
-   - `gradingMarks`: 红笔/OCR 文本批改标记。
-   - `mistakeCandidates`: 根据题号、红笔位置、小问位置绑定出的疑似错题。
-6. Web 端把 OCR 结果整理成 `PaperVisionContext`，传给 MiniMax。
+- 一个 `AnalysisBatch`
+- 每张图片一个 `AnalysisJob`
 
-OCR 失败不会直接中断分析。失败时会返回 `status: "failed"` 的 OCR context，后续 MiniMax 仍会使用原图视觉能力继续分析。
+`triggerAnalysisWorker()` 会在当前 Next.js 进程中启动后台 Worker。Worker 每轮最多 claim 4 个 queued job，并发处理。每个 job 都会保存：
 
-### 4. MiniMax 分析
+- `paperVisionContextJson`
+- `analysesJson`
+- `savedMistakesJson`
+- `status`
+- `errorMessage`
 
-入口：`src/lib/analyzer/index.ts`
+状态会汇总回 `AnalysisBatch.status`。上传历史页可以展示每张图是否解析成功、是否失败、是否待人工复核。
 
-真实 AI 实现：`src/lib/analyzer/minimax.ts`
+### 5. 整卷题目页加答题卡分析
 
-处理步骤：
+当 `paperMode=question_pages_with_answer_sheet` 时，上传的多张图会作为一个复合 job 处理：
 
-1. 如果配置了 `MINIMAX_API_KEY` 且有图片数据，则调用 MiniMax。
-2. 如果没有配置 MiniMax Key，则使用 `src/lib/analyzer/simulated.ts` 的模拟结果。
-3. 请求 MiniMax 时会同时传：
-   - 严格 JSON 输出要求。
-   - 所有上传图片。
-   - OCR 证据层。
-   - 学科/年级提示或自动识别要求。
-4. Prompt 要求 MiniMax：
-   - 找出整张试卷里所有能识别的错题。
-   - 不只返回第一题。
-   - 用混合策略判断错题：老师批改标记 + 独立解题对比学生答案。
-   - 优先把红色批改作为老师标记；黑色叉可能是学生排除选项，不能直接判错。
-   - 识别半勾、扣分、远离题干的学生答案区域。
-   - 输出孩子能理解的讲解、知识树上下文、结构化插图数据和深圳题型风格例题。
+1. `relatedImagesJson` 保存全部图片，初始 role 都是 `unknown`。
+2. Worker 逐页 OCR，并用 `classifyCompositePageRole()` 判断 `question`、`answer_sheet` 或 `unknown`。
+3. OCR 服务如果检测到答题卡区域，会返回 `pageRoleHint=answer_sheet`。
+4. 系统对答题卡页做额外检测：
+   - 宽图会切成左右和上下区域，降低 MiniMax 输出截断概率。
+   - `detectAnswerSheetMistakesWithMiniMax()` 只负责识别答题卡上的红叉、半勾、半叉、扣分数字。
+   - 只接受置信度不低于 `0.6` 的候选。
+5. `matchAnswerSheetMistakes()` 用题号和相邻页规则，把答题卡错题匹配回题目页。
+6. 对每个匹配成功的错题，单独调用 MiniMax 生成讲解。
+7. 匹配失败、仅 OCR 结果或不确定结果会进入 `needs_review`，避免把不可靠结论直接当成错题。
 
-MiniMax 返回后会做多层解析：
+### 6. OCR 服务
 
-1. 先直接解析严格 JSON。
-2. 如果返回了 `<think>`、前后缀文本或多余内容，会尝试截取第一个 JSON 对象。
-3. 如果是类 JSON，会尝试修复中文引号、未加引号字段、尾随逗号。
-4. 如果仍失败，会发第二次 MiniMax 请求，把内容修复成严格 JSON。
-5. 如果修复后仍失败，会发紧凑修复请求。
-6. 如果视觉请求超时且 OCR 可用，会走 OCR-only MiniMax 分析。
-7. 如果 MiniMax 漏掉 OCR `mistakeCandidates`，会请求扩展覆盖。
-8. 如果扩展也失败，会把 OCR 候选保存为 `suspected` 错题，避免完全漏题。
+入口：`ocr_service/app.py`
 
-如果 `ENABLE_AI_FALLBACK=true`，MiniMax 失败后会退回模拟分析。默认建议保持 `false`，这样真实 AI 问题会暴露出来，便于调试。
+Web 端通过 `src/lib/ocr/client.ts` 调用 `OCR_SERVICE_URL`。请求会同时带：
 
-### 5. 错题保存与知识漏洞更新
+- `image`：1600px 左右的分析图，用于 OCR。
+- `originalImage`：原始上传图，用于 YOLO 批改标记检测。
+
+OCR 服务返回并归一化为 `PaperVisionContext`：
+
+- `rawText`
+- `textBlocks`
+- `questionCandidates`
+- `layoutRegions`
+- `gradingMarks`
+- `mistakeCandidates`
+- `debugArtifacts`
+- `pageRoleHint`
+
+OCR 服务内部步骤：
+
+1. Pillow 打开图片，并按 `OCR_MAX_SIDE` 缩放，默认最长边 1800。
+2. PaddleOCR 识别文字、坐标、置信度。
+3. OCRAutoScore YOLO 检测答题卡作答区域；模型不存在时自动禁用。
+4. YOLO26n + SAHI 在原图上检测老师批改标记；模型不存在或失败时退回红笔像素规则。
+5. `normalization.py` 把文字块、题号、批改标记绑定成疑似错题候选。
+
+如果 OCR 请求失败，Web 端不会直接中断分析，而是生成 `status=failed` 的 OCR context，让 MiniMax 继续使用原图视觉能力分析。
+
+### 7. MiniMax 分析和 JSON 修复
+
+入口：`src/lib/analyzer/index.ts`、`src/lib/analyzer/minimax.ts`
+
+当 `MINIMAX_API_KEY` 存在且传入图片时，系统调用 MiniMax；否则走 `src/lib/analyzer/simulated.ts` 的模拟结果。
+
+MiniMax 输入包含：
+
+- 原始或压缩后的分析图片。
+- OCR 证据层。
+- 候选错题裁剪图。
+- 学科、年级提示或自动识别要求。
+- 试卷模式、页面角色、目标题号。
+
+Prompt 要求模型：
+
+- 尽量找出整张图片里所有可识别错题，而不是只返回第一题。
+- 同时使用老师批改标记和独立解题对比学生答案。
+- 优先识别红色老师批改；黑笔叉号不能直接当成错题。
+- 识别半勾、半叉、扣分、远离题干的学生答案和涂改较多的答案。
+- 生成孩子能听懂的讲解、知识树上下文、类比、插图结构、例题、深圳题型风格练习和母题。
+
+MiniMax 输出必须是 JSON。代码会做多层兜底：
+
+1. 直接解析 JSON。
+2. 去除 `<think>`、前后缀文本、多余 Markdown。
+3. 截取第一个 JSON 对象。
+4. 修复常见类 JSON 问题。
+5. 请求 MiniMax 把坏 JSON 修复为严格 JSON。
+6. 必要时发紧凑修复请求。
+7. 如果视觉请求超时且 OCR 可用，尝试 OCR-only 分析。
+8. 如果 AI 漏掉高置信 OCR 候选，尝试覆盖扩展。
+
+`ENABLE_AI_FALLBACK=true` 时，MiniMax 失败会退回 mock。调试真实 AI 时建议保持 `false`，否则问题会被模拟结果掩盖。
+
+### 8. 保存错题、知识漏洞和母题
 
 入口：`src/lib/repositories/mistakes.ts`
 
-每一道 AI 返回的 `analysis` 会进入事务保存：
+每道分析结果会进入事务：
 
-1. 取第一个 `knowledgePoints[0]` 作为主知识点。
-2. `KnowledgePoint` 按 `subject + grade + name` upsert。
-3. `Archetype` 按 `subject + grade + knowledgePointId + title` upsert。
-4. 检查同一个孩子、同学科、同年级下是否已存在相同题干：
-   - 题干会去空格、标点并小写化后比较。
-   - 如果相同题目已存在且知识漏洞已存在，直接返回旧错题和旧漏洞，不重复叠加错误次数。
-5. 新错题写入 `Mistake`。
-6. 建立 `MistakeArchetype` 关联。
-7. 写入一条初始 `TutorMessage`，内容为 AI 的孩子版讲解。
-8. 重新统计该知识点下的错题数和同母题重复数，更新 `KnowledgeGap`。
+1. 取 `knowledgePoints[0]` 作为主知识点。
+2. 按 `subject + grade + name` upsert `KnowledgePoint`。
+3. 按 `subject + grade + knowledgePointId + title` upsert `Archetype`。
+4. 用题干归一化和 bigram 相似度判断重复错题。
+5. 如果同一错题已经存在，不新增错题，也不重复叠加错误次数。
+6. 新错题写入 `Mistake`，并关联 `MistakeArchetype`。
+7. 写入初始 `TutorMessage`。
+8. 重新统计同知识点错题数和同母题重复数，更新 `KnowledgeGap`。
 
 漏洞严重程度：
 
-- `normal`: 普通错题。
-- `weak`: 同一知识点错误数达到 2。
-- `important`: 同一知识点错误数达到 3。
-- `repeated_archetype`: 同一母题重复出错达到 2。
+- `normal`：普通错题。
+- `weak`：同知识点错题数达到 2。
+- `important`：同知识点错题数达到 3。
+- `repeated_archetype`：同母题重复出错达到 2。
 
-### 6. 首页历史与继续追问
+人工复核会影响统计：确认不是错题的记录不会继续计入活跃知识漏洞。
 
-历史接口：`src/app/api/history/route.ts`
+## 页面和接口
 
-- 查询最近 20 条错题。
-- 根据已保存的错题和母题重建首页可展示的 `analysis` 结构。
-- 返回原图 URL、错题解析、消息记录。
+### 页面
 
-追问接口：`src/app/api/chat/route.ts`
+- `/`：上传试卷、查看本次分析、AI 分析历史和对话历史。
+- `/uploads`：上传历史、状态筛选、失败重试、批量重试。
+- `/mistakes`：错题本列表。
+- `/mistakes/[id]`：错题详情，包含原始上传照片、解析、母题和追问记录。
+- `/gaps`：知识漏洞列表，可下钻到知识点详情。
+- `/tree`：按学科和年级查看期末知识树，可下钻到知识点详情。
+- `/knowledge-points/[id]`：知识点详情，包含通俗讲解、类比、知识树位置、例题、深圳题型风格练习、母题和关联错题。
+- `/review`：人工复核。
+- `/practice`：错题练习。
+- `/teacher`：教师视角页面。
 
-1. 解析用户消息。
-2. 如果传了 `mistakeId`，先确认错题属于默认学生。
-3. 用 `src/lib/study-guard.ts` 判断是否学习相关。
-4. 游戏、娱乐、绕过规则、闲聊会被拦截并写入 `NonStudyRequestLog`。
-5. 学习问题会生成一个固定模板回复。
-6. 如果有关联错题，会把用户问题和老师回复写入 `TutorMessage`。
+### API
 
-当前追问回复不是 MiniMax 实时生成，而是本地模板回复。
+- `POST /api/analyze`：上传并启动分析。
+- `GET /api/analysis-batches/[id]`：查询异步批次状态和结果。
+- `POST /api/analysis-batches/[id]/retry`：重试失败任务。
+- `GET /api/upload-history`：上传历史列表和汇总。
+- `POST /api/upload-history/retry`：按上传记录或 job 批量重试，带图片 hash 去重。
+- `GET /api/uploads/[filename]`：读取原始上传图片或分析图。
+- `GET /api/history`：首页分析历史。
+- `GET /api/mistakes`、`GET /api/mistakes/[id]`：错题列表和详情。
+- `GET /api/knowledge-gaps`：知识漏洞列表。
+- `GET /api/knowledge-tree`：期末知识树。
+- `GET /api/knowledge-points/[id]`：知识点讲解详情。
+- `POST /api/chat`：围绕错题追问，带学习范围限制。
+- `POST /api/review-mistakes`：人工复核错题。
+- `POST /api/practice-set`：生成练习。
 
-### 7. 错题本、知识漏洞、期末知识树
-
-错题本：
-
-- 列表页：`src/app/mistakes/page.tsx`
-- 详情页：`src/app/mistakes/[id]/page.tsx`
-- API：`src/app/api/mistakes/route.ts`、`src/app/api/mistakes/[id]/route.ts`
-
-知识漏洞：
-
-- 页面：`src/app/gaps/page.tsx`
-- API：`src/app/api/knowledge-gaps/route.ts`
-- 按 `severityRank` 和最近发生时间排序。
-
-期末知识树：
-
-- 页面：`src/app/tree/page.tsx`
-- API：`src/app/api/knowledge-tree/route.ts`
-- 构建逻辑：`src/lib/knowledge/tree.ts`
-- 默认查询 `八年级 + 数学`，可按学科和年级筛选。
-- 树节点会向父节点汇总错误数、同母题重复数和最严重漏洞标记。
-
-当前代码没有独立的知识点详情页；知识漏洞和知识树主要提供列表/树状视图。
-
-### 8. 图片访问
-
-图片接口：`src/app/api/uploads/[filename]/route.ts`
-
-- 通过文件名读取 `process.cwd()/uploads/<filename>`。
-- 根据扩展名返回 `image/jpeg`、`image/png`、`image/webp`、`image/heic`、`image/heif`。
-- 文件不存在时返回 `404 { "error": "图片不存在。" }`。
-
-## 环境要求
+## 本地环境要求
 
 ### Node.js
 
-建议使用 Node.js 22 或更高版本。当前本地验证环境曾使用：
+建议 Node.js 22 或更高版本。项目依赖 `@types/node@22`，当前 Next.js 版本为 15。
 
 ```bash
 node --version
-# v24.x
-
 npm --version
-# 11.x
 ```
 
 ### Python
 
-OCR 服务建议使用 Python 3.11。
-
-已验证环境示例：
+OCR 服务建议 Python 3.11。不要优先使用系统 Python 3.14，因为 PaddleOCR/PaddlePaddle 的 wheel 对 Python 版本和平台更敏感。
 
 ```bash
-/opt/miniconda3/envs/paddle_env/bin/python3 --version
-# Python 3.11.x
+python3 --version
 ```
 
-不要直接使用系统 Python 3.14 跑 OCR 服务。PaddleOCR/PaddlePaddle 对 Python 版本和平台 wheel 比较敏感，Python 3.11 是当前项目更稳定的选择。
+Apple Silicon 或不同 CPU/GPU 环境需要安装匹配硬件和 Python 版本的 PaddlePaddle wheel。
 
 ### 系统依赖
 
-- macOS / Linux 均可开发。
-- HEIC/HEIF 转换依赖 macOS `sips`；非 macOS 环境建议上传 JPG、PNG 或 WebP。
-- Apple Silicon 或不同 CPU/GPU 环境安装 PaddlePaddle 时，需要选择匹配平台的 wheel。
+- macOS 本地开发可直接使用 `sips` 生成分析图和转换 HEIC。
+- 非 macOS 环境建议上传 JPG、PNG 或 WebP，或自行替换图片压缩转换实现。
+- YOLO 检测默认使用 `mps`，CPU 环境可设置 `OCR_GRADING_DEVICE=cpu`。
 
-## 安装 Web 依赖
+## 安装和启动
+
+### 1. 安装 Web 依赖
 
 ```bash
 npm install
 ```
 
-## 配置环境变量
-
-复制示例配置：
+### 2. 配置环境变量
 
 ```bash
 cp .env.example .env.local
 ```
 
-编辑 `.env.local`：
+关键配置：
 
 ```env
 DATABASE_URL="file:./dev.db"
@@ -251,15 +317,28 @@ MINIMAX_TIMEOUT_MS="90000"
 ENABLE_AI_FALLBACK="false"
 OCR_SERVICE_URL="http://127.0.0.1:5005/ocr"
 OCR_TIMEOUT_MS="120000"
+OCR_DEBUG_ARTIFACTS="false"
+```
+
+常用可选配置：
+
+```env
+UPLOAD_ROOT_DIR="/absolute/path/to/uploads"
+ANALYSIS_IMAGE_MAX_DIMENSION="1600"
+ANALYSIS_IMAGE_QUALITY="75"
+ANALYZE_IMAGE_CONCURRENCY="4"
+OCR_IMAGE_CONCURRENCY="2"
+OCR_SERIALIZE_REQUESTS="true"
 ```
 
 说明：
 
-- `ENABLE_AI_FALLBACK=false` 时，真实 AI 失败会直接返回错误，不走 mock。
-- `OCR_SERVICE_URL` 必须指向本地 OCR 服务的 `/ocr` 接口。
-- MiniMax 国内站 API Key 不要提交到 Git。
+- `UPLOAD_ROOT_DIR` 不设置时，图片保存在项目根目录 `uploads/`。
+- `OCR_SERIALIZE_REQUESTS` 默认不是 `false` 时会串行调用 OCR，降低 PaddleOCR 并发崩溃概率。
+- `ENABLE_AI_FALLBACK=false` 可以暴露真实 MiniMax 错误，排障时建议保持 false。
+- API Key 不要提交到 Git。
 
-## 初始化数据库
+### 3. 初始化数据库
 
 ```bash
 npm run prisma:generate
@@ -267,31 +346,16 @@ npm run prisma:migrate
 npm run prisma:seed
 ```
 
-数据库默认写入 `prisma/dev.db`，该文件已被 `.gitignore` 忽略。
+### 4. 启动 OCR 服务
 
-## 搭建 OCR 服务
-
-推荐使用 Conda 创建 Python 3.11 环境：
+推荐使用独立 Python 3.11 环境：
 
 ```bash
-conda create -n paddle_env python=3.11
-conda activate paddle_env
+python3.11 -m venv .venv-ocr
+source .venv-ocr/bin/activate
 pip install -r ocr_service/requirements.txt
 pip install paddlepaddle
-```
-
-如果 `pip install paddlepaddle` 失败，请按 PaddlePaddle 官网选择匹配当前机器、Python 版本和 CPU/GPU 的安装命令。
-
-启动 OCR 服务：
-
-```bash
 python3 ocr_service/app.py
-```
-
-服务默认监听：
-
-```text
-http://127.0.0.1:5005
 ```
 
 健康检查：
@@ -300,175 +364,149 @@ http://127.0.0.1:5005
 curl http://127.0.0.1:5005/health
 ```
 
-OCR 接口要求 multipart 表单字段名为 `image`：
+返回里会显示：
 
-```bash
-curl -X POST http://127.0.0.1:5005/ocr \
-  -F 'image=@tests/2912.JPG;type=image/jpeg'
+- `layoutDetector`: `ocrautoscore-yolov8` 或 `disabled`
+- `gradingDetector`: `yolo26n-hard-v2-sahi` 或 `red-ink-fallback`
+
+如果没有放置本地模型文件，系统仍可运行，但会少一层视觉检测能力。
+
+### 5. 可选 OCR 模型配置
+
+答题卡区域模型：
+
+```env
+OCR_LAYOUT_ENABLED="true"
+OCR_LAYOUT_MODEL_PATH="/absolute/path/to/answer_sheet_layout.pt"
+OCR_LAYOUT_CONFIDENCE="0.25"
+OCR_LAYOUT_IMAGE_SIZE="640"
+OCR_LAYOUT_TIMEOUT_SECONDS="45"
 ```
 
-## 启动 Web 应用
+批改标记模型：
 
-开发模式：
+```env
+OCR_GRADING_ENABLED="true"
+OCR_GRADING_MODEL_PATH="/absolute/path/to/error_mark_yolo26n_hard_v2.pt"
+OCR_GRADING_DEVICE="mps"
+OCR_GRADING_CANDIDATE_CONFIDENCE="0.03"
+OCR_GRADING_FINAL_CONFIDENCE="0.40"
+OCR_GRADING_AUTO_CONFIDENCE="0.80"
+OCR_GRADING_SLICE_SIZE="640"
+OCR_GRADING_OVERLAP="0.20"
+OCR_GRADING_NMS_IOU="0.50"
+OCR_GRADING_TIMEOUT_SECONDS="90"
+```
+
+调试 OCR 可视化：
+
+```env
+OCR_DEBUG_ARTIFACTS="true"
+OCR_DEBUG_OUTPUT_DIR="/absolute/path/to/tmp/ocr-debug"
+```
+
+启用后 `/ocr` 响应会带 `debugArtifacts`，并可通过 `http://127.0.0.1:5005/debug-artifacts/<filename>` 查看叠加图。
+
+### 6. 启动 Web
 
 ```bash
 npm run dev
 ```
 
-默认访问：
+打开：
 
 ```text
 http://localhost:3000
 ```
 
-指定端口：
+如果 3000 被占用，Next.js 会提示实际端口。
+
+## 测试和检查
 
 ```bash
-npm run dev -- --port 51762
-```
-
-生产构建并启动：
-
-```bash
-npm run build
-npm run start -- -p 57353
-```
-
-访问：
-
-```text
-http://localhost:57353
-```
-
-## 推荐本地启动顺序
-
-开两个终端。
-
-终端 1，OCR 服务：
-
-```bash
-conda activate paddle_env
-python3 ocr_service/app.py
-```
-
-终端 2，Web 服务：
-
-```bash
-npm run dev -- --port 51762
-```
-
-## 验证命令
-
-OCR 单测：
-
-```bash
+npm run lint
+npm run test
 npm run ocr:test
-```
-
-Web/业务单测：
-
-```bash
-npm test
-```
-
-生产构建：
-
-```bash
 npm run build
 ```
 
-当前已知构建警告：
-
-- `src/components/PhotoUploadTutor.tsx` 中使用 `<img>` 展示上传原图，会触发 Next.js 图片优化建议，不影响本地运行。
-
-## 常见问题
-
-### OCR 服务启动失败
-
-优先检查 Python 版本：
+单独测试 OCR 服务：
 
 ```bash
-python3 --version
+PYTHONPATH=ocr_service python3 -m unittest discover -s ocr_service/tests
 ```
 
-如果是 Python 3.14，建议切换到 Python 3.11 Conda 环境。然后重新安装：
+## 常见排障
 
-```bash
-pip install -r ocr_service/requirements.txt
-pip install paddlepaddle
-```
+### 上传后 `uploads/` 为空
 
-### Web 上传图片后没有 OCR 结果
+检查是否设置了 `UPLOAD_ROOT_DIR`。当前代码会优先保存到该目录，而不是项目根目录下的 `uploads/`。
 
-检查 OCR 服务是否在运行：
+### OCR 预处理失败
+
+1. 先检查 OCR 服务是否存活：
 
 ```bash
 curl http://127.0.0.1:5005/health
 ```
 
-检查 `.env.local`：
+2. 检查 `.env.local` 的 `OCR_SERVICE_URL` 是否指向 `/ocr`。
+3. PaddleOCR 首次加载较慢，`OCR_TIMEOUT_MS` 建议不低于 `120000`。
+4. 如果 YOLO 或 layout 模型失败，OCR 服务会记录日志并退回其它路径；一般不会导致整次分析中断。
 
-```env
-OCR_SERVICE_URL="http://127.0.0.1:5005/ocr"
-```
+### MiniMax 返回坏 JSON
 
-OCR 失败时 Web 会继续走原图视觉分析，页面上会显示 OCR 失败或没有文字块。
+常见原因是单次请求图片太多、图片内容过密、模型输出超长、或模型额外输出思考文本。当前代码已经做 JSON 截取、修复、二次修复、紧凑修复和 OCR-only 兜底。仍失败时，多图会把单页标成 `failed` 或 `needs_review`，可以在上传历史里批量重试。
 
-### MiniMax 返回解析失败
+### 多张图片只有 OCR，没有 AI 解析
 
-确认 `.env.local` 中：
+看上传历史里的 job 状态：
 
-```env
-MINIMAX_API_KEY="..."
-MINIMAX_BASE_URL="https://api.minimaxi.com/v1"
-MINIMAX_MODEL="MiniMax-M3"
-MINIMAX_MAX_COMPLETION_TOKENS="16000"
-MINIMAX_TIMEOUT_MS="90000"
-```
+- `failed`：AI 或文件读取失败，可重试。
+- `needs_review`：AI 认为结果不可靠，或答题卡错题没有匹配到题目页。
+- `succeeded`：已经保存可展示错题。
 
-模型偶尔会返回非严格 JSON。项目已有 JSON 截取、类 JSON 修复、二次修复请求、紧凑修复请求、OCR-only 兜底和 OCR 候选兜底，但如果 MiniMax 连续超时或返回异常，仍需要查看服务端日志定位。
+整卷答题卡模式下，题目页和答题卡页必须一起上传；如果答题卡题号不清晰，匹配会更容易进入 `needs_review`。
 
-### 上传后 `uploads/` 为空
+### 黑笔叉被误判为错题
 
-当前代码会把图片写入运行 Web 服务时的 `process.cwd()/uploads`。如果从不同工作目录或 worktree 启动服务，会写到不同目录。
+当前 prompt 和 OCR 规则都要求优先识别红色老师批改。黑笔叉通常视为学生排除选项，不直接判错。若仍出现误判，可以在人工复核页标记为不是错题；该记录不会计入知识漏洞。
 
-另外，当前 `/api/analyze` 如果后续 AI 分析或数据库保存失败，会删除本次刚上传的图片文件。只有分析和保存成功的上传会保留。
+### 同一错题重复提交导致统计异常
 
-### HEIC 上传失败
+保存层会按同学科、同年级的归一化题干和相似度做去重。人工已复核的相似错题也会被优先识别，避免重复叠加错误次数。
 
-HEIC/HEIF 会调用 macOS `sips` 转 JPEG。非 macOS 环境建议改传 JPG、PNG 或 WebP。
-
-### 一次上传很多页耗时较长
-
-当前实现是同步处理：
-
-- 每张图先 OCR。
-- 所有图片一起发给 MiniMax。
-- MiniMax 返回后再保存每一道错题。
-
-如果图片多、试卷密、MiniMax 响应慢，页面会等待较久。当前代码没有后台队列、批量任务状态和批量重试。
-
-## 目录说明
+## 目录结构
 
 ```text
-src/app/             Next.js 页面和 API Route
-src/components/      前端组件，包含上传页和解析卡片
-src/lib/analyzer/    MiniMax 调用、JSON 修复、OCR 候选兜底、模拟分析
-src/lib/ocr/         Web 端调用 OCR 服务的客户端
-src/lib/knowledge/   知识漏洞严重程度和知识树构建
-src/lib/repositories/错题、母题、知识漏洞保存逻辑
-ocr_service/         Flask + PaddleOCR OCR 服务
-prisma/              SQLite schema、migration、seed
-tests/               单元测试和本地测试样例
-uploads/             本地上传图片，已忽略
+src/app/                         Next.js 页面和 API
+src/components/                  上传、错题、知识树、复核等前端组件
+src/lib/analysis/jobs.ts          异步分析队列和重试逻辑
+src/lib/analyzer/minimax.ts       MiniMax 调用、提示词、JSON 修复
+src/lib/ocr/client.ts             Web 端 OCR 客户端
+src/lib/repositories/mistakes.ts  错题保存、去重、知识漏洞统计
+src/lib/knowledge/                知识树和知识点详情
+src/lib/uploads.ts                上传目录解析
+ocr_service/                      Flask OCR 服务
+ocr_service/grading.py            YOLO26n 批改标记检测入口
+ocr_service/layout.py             OCRAutoScore 答题卡区域检测入口
+prisma/schema.prisma              数据模型
 ```
 
-## Git 注意事项
+## 数据模型要点
 
-以下文件不要提交：
+- `Mistake`：错题、原图路径、AI 判断、人工复核状态、富内容状态。
+- `KnowledgePoint`：按学科、年级、知识点组织。
+- `KnowledgeGap`：单个孩子在某知识点上的漏洞统计。
+- `Archetype`：母题。
+- `MistakeArchetype`：错题和母题关联。
+- `TutorMessage`：围绕错题的对话历史。
+- `AnalysisBatch`：一次异步上传批次。
+- `AnalysisJob`：批次里的单页任务或整卷复合任务。
 
-- `.env.local`
-- `prisma/dev.db`
-- `uploads/`
-- 本地试卷照片样例，例如 `tests/2912.JPG`
+## 当前工程边界
 
+- 当前是单孩子本地版本，没有账号体系和多孩子权限隔离。
+- 后台 Worker 运行在 Next.js 进程内，不是独立队列服务；生产环境建议迁移到 BullMQ、Sidekiq、Celery 或托管任务队列。
+- MiniMax 解析质量受图片清晰度、OCR 质量和模型输出稳定性影响；高风险结果会进入人工复核。
+- 深圳题型风格练习是基于错题生成的风格化练习，不是直接引用真实真题原文。
