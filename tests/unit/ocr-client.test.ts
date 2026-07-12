@@ -39,6 +39,9 @@ describe("OCR client", () => {
               judgement: "wrong",
               evidenceSummary: "题目旁有红叉。"
             }
+          ],
+          debugArtifacts: [
+            { kind: "combined-ocr", path: "/tmp/debug.jpg", url: "/debug-artifacts/debug.jpg" }
           ]
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
@@ -50,6 +53,9 @@ describe("OCR client", () => {
       filename: "paper.png",
       mimeType: "image/png",
       imageBase64: Buffer.from("image-bytes").toString("base64"),
+      originalImageBase64: Buffer.from("original-image-bytes").toString("base64"),
+      originalMimeType: "image/png",
+      debugArtifacts: true,
       sourceImageIndex: 0
     });
 
@@ -74,12 +80,19 @@ describe("OCR client", () => {
           judgement: "wrong",
           evidenceSummary: "题目旁有红叉。"
         }
+      ],
+      debugArtifacts: [
+        { kind: "combined-ocr", path: "/tmp/debug.jpg", url: "/debug-artifacts/debug.jpg" }
       ]
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:5005/ocr",
       expect.objectContaining({ method: "POST", body: expect.any(FormData) })
     );
+    const requestBody = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(requestBody.get("image")).toBeInstanceOf(Blob);
+    expect(requestBody.get("originalImage")).toBeInstanceOf(Blob);
+    expect(requestBody.get("debug")).toBe("true");
   });
 
   it("returns null when OCR_SERVICE_URL is not configured", async () => {

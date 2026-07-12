@@ -141,6 +141,7 @@ function normalizedQuestionId(value: string | undefined) {
 }
 
 function isReliableMistakeCandidate(candidate: MatchedMistake["candidate"]) {
+  if (candidate.requiresManualReview === true) return false;
   return (
     candidate.judgement === "wrong" ||
     candidate.judgement === "partial" ||
@@ -356,9 +357,19 @@ async function processJob(jobId: string) {
       ? relatedImages
       : [{ filename: job.filename, imagePath: job.imagePath, analysisImagePath: job.analysisImagePath, analysisMimeType: job.analysisMimeType, role: "question" as const }];
     const loadedPages = await Promise.all(pages.map(async (page, index) => {
-      const imagePath = page.analysisImagePath ?? page.imagePath;
-      const imageBase64 = (await readFile(resolveStoredUploadPath(imagePath))).toString("base64");
-      const paperVisionContext = await analyzeImageWithOcr({ filename: page.filename, mimeType: page.analysisMimeType, imageBase64, sourceImageIndex: index });
+      const analysisImagePath = page.analysisImagePath ?? page.imagePath;
+      const [imageBase64, originalImageBase64] = await Promise.all([
+        readFile(resolveStoredUploadPath(analysisImagePath)).then((value) => value.toString("base64")),
+        readFile(resolveStoredUploadPath(page.imagePath)).then((value) => value.toString("base64"))
+      ]);
+      const paperVisionContext = await analyzeImageWithOcr({
+        filename: page.filename,
+        mimeType: page.analysisMimeType,
+        imageBase64,
+        originalImageBase64,
+        originalMimeType: "application/octet-stream",
+        sourceImageIndex: index
+      });
       return { ...page, role: classifyCompositePageRole(page, paperVisionContext), imageBase64, paperVisionContext };
     }));
     const firstPage = loadedPages[0];

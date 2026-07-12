@@ -727,15 +727,16 @@ describe("simulated analyzer", () => {
       imageBase64: "first-image",
       images: [
         { filename: "page-1.png", mimeType: "image/png", imageBase64: "first-image" },
-        { filename: "page-2.png", mimeType: "image/jpeg", imageBase64: "second-image" }
-      ]
+        { filename: "page-1.png-candidate-q1.jpg", mimeType: "image/jpeg", imageBase64: "second-image" }
+      ],
+      paperLayout: "independent_pages"
     });
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as {
       thinking?: { type?: string };
       response_format?: { type?: string };
       max_completion_tokens?: number;
-      messages: Array<{ content: Array<{ type: string; image_url?: { url: string } }> }>;
+      messages: Array<{ content: Array<{ type: string; text?: string; image_url?: { url: string } }> }>;
     };
     expect(requestBody.thinking).toEqual({ type: "disabled" });
     expect(requestBody.response_format).toEqual({ type: "json_object" });
@@ -744,6 +745,10 @@ describe("simulated analyzer", () => {
       .filter((item) => item.type === "image_url")
       .map((item) => item.image_url?.url);
     expect(imageUrls).toEqual(["data:image/png;base64,first-image", "data:image/jpeg;base64,second-image"]);
+    const prompt = requestBody.messages[0].content.find((item) => item.type === "text")?.text ?? "";
+    expect(prompt).toContain("其余图片是程序从原始上传照片按错题候选裁出的高分辨率局部证据图");
+    expect(prompt).toContain("印刷体 A/B/C/D 只是选项标签");
+    expect(prompt).toContain("studentAnswer 必须写“无法确认”");
   });
 
   it("asks MiniMax to infer missing subject and grade from image evidence without hidden defaults", async () => {

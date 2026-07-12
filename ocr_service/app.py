@@ -3,9 +3,11 @@ import logging
 from io import BytesIO
 from threading import Lock
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from PIL import Image
 
+from debug_artifacts import debug_artifacts_enabled, get_debug_output_dir, write_debug_artifacts
+from grading import detect_grading_marks, grading_detector_available, scale_grading_marks
 from layout import detect_answer_sheet_layout, layout_detector_available
 from marks import detect_red_marks
 from normalization import normalize_paddle_result
@@ -59,7 +61,13 @@ def health():
         "service": "private-tutor-ocr",
         "engine": "paddleocr",
         "layoutDetector": "ocrautoscore-yolov8" if layout_detector_available() else "disabled",
+        "gradingDetector": "yolo26n-hard-v2-sahi" if grading_detector_available() else "red-ink-fallback",
     })
+
+
+@app.get("/debug-artifacts/<path:filename>")
+def debug_artifact(filename):
+    return send_from_directory(get_debug_output_dir(), filename)
 
 
 @app.post("/ocr")
@@ -69,9 +77,18 @@ def ocr():
         return jsonify({"success": False, "error": "missing image form field"}), 400
 
     try:
-        image = prepare_image_for_ocr(Image.open(BytesIO(uploaded.read())).convert("RGB"))
+        analysis_image = Image.open(BytesIO(uploaded.read())).convert("RGB")
+        image = prepare_image_for_ocr(analysis_image)
     except Exception as exc:
         return jsonify({"success": False, "error": f"invalid image: {exc}"}), 400
+
+    detection_image = analysis_image
+    original_uploaded = request.files.get("originalImage")
+    if original_uploaded is not None:
+        try:
+            detection_image = Image.open(BytesIO(original_uploaded.read())).convert("RGB")
+        except Exception:
+            app.logger.warning("Original image could not be decoded for YOLO; using the analysis JPEG instead")
 
     try:
         import numpy as np
@@ -91,10 +108,28 @@ def ocr():
         app.logger.exception("Answer-sheet layout detection failed; continuing with full-page OCR")
         layout_regions = []
 
-    payload = normalize_paddle_result(raw_result, grading_marks=detect_red_marks(image))
+    detected_marks = []
+    try:
+        detected_marks = detect_grading_marks(detection_image)
+        grading_marks = scale_grading_marks(detected_marks, detection_image.size, image.size)
+    except Exception:
+        app.logger.exception("YOLO grading-mark detection failed; using red-ink fallback")
+        grading_marks = detect_red_marks(image)
+
+    payload = normalize_paddle_result(raw_result, grading_marks=grading_marks)
     payload["layoutRegions"] = layout_regions
     payload["pageRoleHint"] = "answer_sheet" if layout_regions else "unknown"
     payload["filename"] = uploaded.filename
+    debug_requested = request.form.get("debug")
+    if debug_artifacts_enabled(debug_requested):
+        payload["debugArtifacts"] = write_debug_artifacts(
+            filename=uploaded.filename,
+            analysis_image=image,
+            detection_image=detection_image,
+            layout_regions=layout_regions,
+            original_marks=detected_marks,
+            scaled_marks=grading_marks,
+        )
     return jsonify(payload)
 
 

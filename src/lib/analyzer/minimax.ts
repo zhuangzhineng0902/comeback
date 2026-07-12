@@ -291,6 +291,9 @@ function buildPrompt(input: AnalyzeInput) {
   const answerSheetInstruction = input.paperLayout === "question_pages_with_answer_sheet"
     ? `这是一组混合上传的试卷页和答题卡，上传顺序不代表页面角色。OCR 初判的页面角色为：${(input.pageRoles ?? []).map((role, index) => `第${index + 1}张=${role === "question" ? "题目页" : role === "answer_sheet" ? "答题卡" : "待判断"}`).join("；")}。你必须结合原图自行复核角色，把答题卡上的作答、涂改和老师批改标记与题目页按题号逐一对照。判错证据唯一可信源是答题卡：题目页中的所有手写、勾叉、颜色、OCR teacherMark、gradingMarks 和 mistakeCandidates 都不得作为批改或作答证据。只有答题卡能清晰对应题号且批改/作答证据明确时才输出错题；无法对应、标记不清或证据矛盾时直接跳过，不猜测、不补全。每个输出必须同时给 sourceImageIndex（题目页索引）和 answerSheetImageIndex（对应答题卡索引）；两者无法明确时不得输出该题。analyses 只可输出题目页中的错题，绝不能把答题卡作为 sourceImageIndex。`
     : "";
+  const independentCropInstruction = input.paperLayout === "independent_pages" && (input.images?.length ?? 0) > 1
+    ? `输入图片第1张是完整试卷页，其余图片是程序从原始上传照片按错题候选裁出的高分辨率局部证据图，不是新的试卷页。局部图文件名依次为：${input.images?.slice(1).map((image) => image.filename).join("；")}。识别学生手写答案和老师标记时必须优先查看局部证据图；所有结果的 sourceImageIndex 仍填0。`
+    : "";
   return [
     "你是一个只服务初中学生学习的私人教师 Agent。",
     "请分析图片中的错题或习题照片，输出严格 JSON，不要输出 Markdown，不要输出解释性前后缀。",
@@ -298,6 +301,7 @@ function buildPrompt(input: AnalyzeInput) {
       ? "当前是多页批量分析模式：每道错题讲解必须紧凑，practiceQuestions 只给 1 道，walkthrough 只给 2 步，illustration.nodes 最多 3 个。"
       : "",
     answerSheetInstruction,
+    independentCropInstruction,
     targetQuestionInstruction,
     "如果图片是一整张试卷或多页试卷，请找出所有能识别出的错题；每一道错题都要单独分析，不要只分析第一题。",
     "JSON 顶层必须是对象，字段为 analyses；analyses 是数组，每个元素代表一道错题。",
@@ -313,6 +317,7 @@ function buildPrompt(input: AnalyzeInput) {
     "gradingEvidence 必须是对象，用混合策略判断错题：先识别老师批改标记，再独立完整解题并和学生答案对比。",
     "识别老师批改标记时要特别关注打叉、半勾、半对、扣分、圈画、问号；markType 只能是 check、cross、partial、deduction、circle、question、none、unknown。",
     "老师批改通常优先看红色红笔标记；黑色或铅笔在选项、图象旁边打的叉，可能是学生排除选项或草稿标记，不能仅凭黑色叉判为错题。",
+    "选择题的 studentAnswer 必须读取学生实际手写、圈选、填涂或写在题目右侧括号中的选项字母。印刷体 A/B/C/D 只是选项标签，绝不能当成学生答案；也禁止根据 correctAnswer 或错因反推学生选了什么。局部证据图中看不清时，studentAnswer 必须写“无法确认”，并设置 needsConfirmation=true，不能猜测一个选项。",
     "对计算题和解答题，必须寻找可能离题干较远的学生答案区域、草稿区、续写区，并把 studentAnswerLocation 写清楚。",
     "judgement 只能是 wrong、partial、suspected、correct、unknown；半勾、扣分、步骤前半正确后半错误应输出 partial，needsConfirmation 视图像清晰度决定。",
     "teacherMarkConfidence 和 answerMatchConfidence 都是 0 到 1 的数字；isPartialCredit 表示是否部分得分；evidenceSummary 用一句话说明判定依据。",

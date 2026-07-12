@@ -68,7 +68,7 @@ MINIMAX_MAX_COMPLETION_TOKENS="16000"
 MINIMAX_TIMEOUT_MS="90000"
 ENABLE_AI_FALLBACK="false"
 OCR_SERVICE_URL="http://127.0.0.1:5005/ocr"
-OCR_TIMEOUT_MS="45000"
+OCR_TIMEOUT_MS="120000"
 ```
 
 说明：
@@ -263,4 +263,3 @@ uploads/             本地上传图片，已忽略
 - `prisma/dev.db`
 - `uploads/`
 - 本地试卷照片样例，例如 `tests/2912.JPG`
-

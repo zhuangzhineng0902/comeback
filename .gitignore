@@ -5,6 +5,10 @@
 node_modules/
 .next/
 dist/
+runs/
+zhineng-zhuang/
+tmp/
+weights/
 coverage/
 __pycache__/
 *.pyc

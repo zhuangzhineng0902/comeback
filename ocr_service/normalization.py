@@ -220,45 +220,56 @@ def _is_major_solution_question(question: dict[str, Any]) -> bool:
     return question_id.isdigit() and int(question_id) >= 14
 
 
+def _question_columns(questions: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    positioned = [question for question in questions if question.get("bbox") and len(question["bbox"]) == 4]
+    if not positioned:
+        return []
+    positioned.sort(key=lambda question: question["bbox"][0])
+    page_span = max(question["bbox"][2] for question in positioned) - min(question["bbox"][0] for question in positioned)
+    split_gap = max(220.0, page_span * 0.18)
+    columns: list[list[dict[str, Any]]] = []
+    previous_left = None
+    for question in positioned:
+        left = float(question["bbox"][0])
+        if previous_left is None or left - previous_left > split_gap:
+            columns.append([])
+        columns[-1].append(question)
+        previous_left = left
+    return [sorted(column, key=lambda question: question["bbox"][1]) for column in columns]
+
+
 def _find_nearest_question(mark: dict[str, Any], questions: list[dict[str, Any]]) -> dict[str, Any] | None:
     mark_center = _center(mark.get("bbox"))
     if not mark_center:
         return None
 
-    question_centers = [_center(question.get("bbox")) for question in questions]
-    x_centers = sorted(center[0] for center in question_centers if center)
-    median_x = x_centers[len(x_centers) // 2] if x_centers else mark_center[0]
-    prefer_right_column = mark_center[0] > median_x + 220
-    ranked = []
-    for question in questions:
-        question_box = question.get("bbox")
-        question_center = _center(question_box)
-        if not question_center:
-            continue
-        if question.get("inferred") and abs(mark_center[1] - question_center[1]) > 110:
-            continue
-        if not _is_mark_in_question_column(mark.get("bbox"), question_box) and not (
-            _is_major_solution_question(question)
-            and question_box
-            and question_box[0] - 120 <= mark_center[0] <= question_box[2] + 650
-        ):
-            continue
-        if prefer_right_column and question_center[0] < median_x and not _is_major_solution_question(question):
-            continue
-        if not prefer_right_column and question_center[0] > median_x + 180 and not _is_major_solution_question(question):
-            continue
-        y_gap = mark_center[1] - question_center[1]
-        if y_gap < -90:
-            continue
-        overlap = _horizontal_overlap_ratio(mark.get("bbox"), question_box)
-        x_gap = max(0, question_box[0] - mark_center[0], mark_center[0] - question_box[2])
-        if overlap <= 0 and x_gap > (700 if _is_major_solution_question(question) else 420):
-            continue
-        ranked.append((abs(y_gap) + x_gap * 0.4 + _distance(mark_center, question_center) * 0.05, question))
-
-    if not ranked:
+    columns = _question_columns(questions)
+    if not columns:
         return None
-    return sorted(ranked, key=lambda item: item[0])[0][1]
+    column_lefts = [sum(float(question["bbox"][0]) for question in column) / len(column) for column in columns]
+    selected_index = min(range(len(columns)), key=lambda index: abs(mark_center[0] - column_lefts[index]))
+    if len(columns) > 1:
+        for index in range(len(columns) - 1):
+            boundary = (column_lefts[index] + column_lefts[index + 1]) / 2
+            if mark_center[0] <= boundary:
+                selected_index = index
+                break
+        else:
+            selected_index = len(columns) - 1
+
+    column = columns[selected_index]
+    first_top = float(column[0]["bbox"][1])
+    if mark_center[1] < first_top - 90:
+        return None
+    preceding = [question for question in column if float(question["bbox"][1]) <= mark_center[1] + 20]
+    selected = preceding[-1] if preceding else column[0]
+    selected_box = selected["bbox"]
+    if selected.get("inferred") and abs(mark_center[1] - _center(selected_box)[1]) > 110:
+        return None
+    max_vertical_gap = 1200 if _is_major_solution_question(selected) else 700
+    if mark_center[1] - float(selected_box[1]) > max_vertical_gap:
+        return None
+    return selected
 
 
 def _find_sub_question(mark: dict[str, Any], blocks: list[dict[str, Any]], question: dict[str, Any] | None) -> str | None:
@@ -301,6 +312,10 @@ def _judgement_from_marks(mark_types: list[str]) -> str:
 def _is_candidate_grading_mark(mark: dict[str, Any]) -> bool:
     source = mark.get("source")
     mark_type = mark.get("markType")
+    if source == "yolo-error-mark":
+        return mark_type == "cross" and (mark.get("confidence") or 0) >= 0.4
+    if source == "yolo-error-mark-review":
+        return mark_type == "question" and (mark.get("confidence") or 0) >= 0.4
     if source == "red-ink":
         if mark_type in {"unknown", "check", "none"}:
             return False
@@ -369,10 +384,15 @@ def build_mistake_candidates(
             if not has_unknown_inside_question:
                 continue
         candidate["judgement"] = _judgement_from_marks(mark_types)
+        candidate["requiresManualReview"] = any(
+            mark.get("source") == "yolo-error-mark-review" or mark.get("requiresManualReview") is True
+            for mark in marks
+        )
         candidate["evidenceSummary"] = f"题号 {candidate.get('questionId')}{'(' + candidate.get('subQuestionId') + ')' if candidate.get('subQuestionId') else ''} 附近发现批改标记：{', '.join(mark_types)}。"
         # Below this threshold, fragmented red ticks and long correction
         # strokes generate substantially more false positives than useful Xs.
-        if (candidate.get("confidence") or 0) >= 0.6:
+        has_yolo_evidence = any(str(mark.get("source", "")).startswith("yolo-error-mark") for mark in marks)
+        if (candidate.get("confidence") or 0) >= (0.4 if has_yolo_evidence else 0.6):
             candidates.append(candidate)
 
     return sorted(candidates, key=lambda item: ((item.get("bbox") or [0, 0, 0, 0])[1], (item.get("bbox") or [0, 0, 0, 0])[0]))

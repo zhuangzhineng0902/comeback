@@ -138,6 +138,24 @@ class NormalizePaddleResultTest(unittest.TestCase):
 
         self.assertFalse(any(candidate["questionId"] == "3" for candidate in payload["mistakeCandidates"]))
 
+    def test_wide_question_text_does_not_steal_marks_from_following_questions(self):
+        result = [[
+            [[[54, 117], [545, 117], [545, 148], [54, 148]], ("7. 上一题", 0.95)],
+            [[[53, 348], [821, 348], [821, 385], [53, 385]], ("8. 很宽的题干一直延伸到右侧", 0.99)],
+            [[[54, 387], [667, 387], [667, 418], [54, 418]], ("9. 求证：BC=DC", 0.95)],
+            [[[56, 740], [550, 740], [550, 773], [56, 773]], ("10. 求证：CB=CD", 0.95)],
+            [[[56, 1060], [622, 1060], [622, 1090], [56, 1090]], ("11. 下一题", 0.95)],
+        ]]
+        grading_marks = [
+            {"markType": "question", "bbox": [674, 439, 869, 608], "confidence": 0.51, "source": "yolo-error-mark-review"},
+            {"markType": "question", "bbox": [540, 811, 773, 982], "confidence": 0.65, "source": "yolo-error-mark-review"},
+            {"markType": "question", "bbox": [541, 1112, 598, 1183], "confidence": 0.45, "source": "yolo-error-mark-review"},
+        ]
+
+        payload = normalize_paddle_result(result, grading_marks=grading_marks)
+
+        self.assertEqual([candidate["questionId"] for candidate in payload["mistakeCandidates"]], ["9", "10", "11"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -51,11 +51,44 @@ OCR_LAYOUT_IMAGE_SIZE="640"
 OCR_LAYOUT_TIMEOUT_SECONDS="45"
 ```
 
+The grading detector uses the locally trained single-class YOLO26n checkpoint
+and SAHI sliced inference. The `/ocr` request may include both `image` (the
+1600px OCR/AI analysis image) and `originalImage` (the original upload). YOLO
+runs on `originalImage` for every independently analyzed page, then its boxes
+are scaled into OCR coordinates. In composite-paper mode, grading candidates
+from pages classified as question pages are discarded during answer matching.
+
+```bash
+OCR_GRADING_ENABLED="true"
+OCR_GRADING_MODEL_PATH="/absolute/path/to/error_mark_yolo26n_hard_v2.pt"
+OCR_GRADING_DEVICE="mps"
+OCR_GRADING_CANDIDATE_CONFIDENCE="0.03"
+OCR_GRADING_FINAL_CONFIDENCE="0.40"
+OCR_GRADING_AUTO_CONFIDENCE="0.80"
+OCR_GRADING_SLICE_SIZE="640"
+OCR_GRADING_OVERLAP="0.20"
+OCR_GRADING_NMS_IOU="0.50"
+OCR_GRADING_TIMEOUT_SECONDS="90"
+```
+
+Intermediate visual debugging is disabled by default. Enable it globally or
+send `debug=true` in a single multipart `/ocr` request. The response then
+contains `debugArtifacts` for the layout overlay, original-resolution YOLO
+overlay, combined OCR-coordinate overlay, and JSON metadata.
+
+```bash
+OCR_DEBUG_ARTIFACTS="true"
+OCR_DEBUG_OUTPUT_DIR="/absolute/path/to/tmp/ocr-debug"
+```
+
+When globally enabled, files are available from
+`http://127.0.0.1:5005/debug-artifacts/<filename>`.
+
 Then set the Next.js app environment:
 
 ```bash
 OCR_SERVICE_URL="http://127.0.0.1:5005/ocr"
-OCR_TIMEOUT_MS="45000"
+OCR_TIMEOUT_MS="120000"
 MINIMAX_MAX_COMPLETION_TOKENS="16000"
 MINIMAX_TIMEOUT_MS="90000"
 ENABLE_AI_FALLBACK="false"

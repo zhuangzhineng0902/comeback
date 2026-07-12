@@ -257,6 +257,8 @@ describe("api routes", () => {
       filename: "paper.png",
       mimeType: "image/png",
       imageBase64: Buffer.from("image-bytes").toString("base64"),
+      originalImageBase64: Buffer.from("image-bytes").toString("base64"),
+      originalMimeType: "image/png",
       sourceImageIndex: 0
     });
     expect(analyzeMistakeMock).toHaveBeenCalledWith(

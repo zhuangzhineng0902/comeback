@@ -3,6 +3,7 @@ import type {
   MistakeJudgement,
   PaperVisionBox,
   PaperVisionContext,
+  PaperVisionDebugArtifact,
   PaperVisionLayoutRegion,
   PaperVisionGradingMark,
   PaperVisionMistakeCandidate,
@@ -14,6 +15,9 @@ type OcrInput = {
   filename: string;
   mimeType: string;
   imageBase64: string;
+  originalImageBase64?: string;
+  originalMimeType?: string;
+  debugArtifacts?: boolean;
   sourceImageIndex: number;
 };
 
@@ -147,7 +151,8 @@ function normalizeGradingMark(value: unknown): PaperVisionGradingMark | null {
     markText: typeof markText === "string" && markText.trim().length > 0 ? markText.trim() : undefined,
     bbox: normalizeBox(record.bbox ?? record.box ?? record.position),
     confidence: normalizeNumber(record.confidence ?? record.score ?? record.probability),
-    source: source === "red-ink" || source === "ocr-text" || source === "vision" || source === "unknown" ? source : undefined
+    source: source === "red-ink" || source === "ocr-text" || source === "vision" || source === "yolo-error-mark" || source === "yolo-error-mark-review" || source === "unknown" ? source : undefined,
+    requiresManualReview: record.requiresManualReview === true
   };
 }
 
@@ -165,6 +170,18 @@ function normalizeLayoutRegion(value: unknown): PaperVisionLayoutRegion | null {
     bbox: normalizeBox(record.bbox ?? record.box ?? record.position),
     confidence: normalizeNumber(record.confidence ?? record.score ?? record.probability),
     source: record.source === "ocrautoscore-yolov8" ? "ocrautoscore-yolov8" : "unknown"
+  };
+}
+
+function normalizeDebugArtifact(value: unknown): PaperVisionDebugArtifact | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const kind = String(record.kind ?? "unknown");
+  const allowed = ["layout", "grading-original", "combined-ocr", "metadata"] as const;
+  return {
+    kind: (allowed as readonly string[]).includes(kind) ? kind as PaperVisionDebugArtifact["kind"] : "unknown",
+    path: typeof record.path === "string" ? record.path : undefined,
+    url: typeof record.url === "string" ? record.url : undefined
   };
 }
 
@@ -190,6 +207,7 @@ function normalizeMistakeCandidate(value: unknown): PaperVisionMistakeCandidate 
     confidence: normalizeNumber(record.confidence ?? record.score ?? record.probability),
     markTypes: markTypes.length > 0 ? markTypes : ["unknown"],
     judgement: normalizeJudgement(record.judgement),
+    requiresManualReview: record.requiresManualReview === true,
     evidenceSummary: typeof evidenceSummary === "string" && evidenceSummary.trim().length > 0 ? evidenceSummary.trim() : "OCR 发现疑似批改标记。"
   };
 }
@@ -239,7 +257,7 @@ function extractQuestionCandidates(payload: Record<string, unknown>) {
 
 function getOcrTimeoutMs() {
   const configured = Number.parseInt(process.env.OCR_TIMEOUT_MS ?? "", 10);
-  return Number.isFinite(configured) && configured > 0 ? configured : 45_000;
+  return Number.isFinite(configured) && configured > 0 ? configured : 120_000;
 }
 
 async function readOcrErrorDetail(response: Response) {
@@ -289,6 +307,7 @@ function normalizeOcrPayload(payload: unknown, input: OcrInput): PaperVisionCont
   const gradingMarks = extractArray(record, ["gradingMarks", "marks", "teacherMarks"], normalizeGradingMark);
   const mistakeCandidates = extractArray(record, ["mistakeCandidates", "wrongQuestionCandidates"], normalizeMistakeCandidate);
   const layoutRegions = extractArray(record, ["layoutRegions", "answerRegions"], normalizeLayoutRegion);
+  const debugArtifacts = extractArray(record, ["debugArtifacts"], normalizeDebugArtifact);
   const pageRoleHint = record.pageRoleHint;
 
   return {
@@ -302,7 +321,8 @@ function normalizeOcrPayload(payload: unknown, input: OcrInput): PaperVisionCont
     layoutRegions: layoutRegions.slice(0, 30),
     pageRoleHint: pageRoleHint === "answer_sheet" || pageRoleHint === "question" ? pageRoleHint : "unknown",
     gradingMarks: gradingMarks.slice(0, 80),
-    mistakeCandidates: mistakeCandidates.slice(0, 40)
+    mistakeCandidates: mistakeCandidates.slice(0, 40),
+    debugArtifacts
   };
 }
 
@@ -317,6 +337,17 @@ export async function analyzeImageWithOcr(input: OcrInput): Promise<PaperVisionC
       const formData = new FormData();
       const bytes = Buffer.from(input.imageBase64, "base64");
       formData.append("image", new Blob([bytes], { type: input.mimeType }), input.filename);
+      if (input.originalImageBase64) {
+        const originalBytes = Buffer.from(input.originalImageBase64, "base64");
+        formData.append(
+          "originalImage",
+          new Blob([originalBytes], { type: input.originalMimeType ?? "application/octet-stream" }),
+          input.filename
+        );
+      }
+      if (input.debugArtifacts === true || process.env.OCR_DEBUG_ARTIFACTS === "true") {
+        formData.append("debug", "true");
+      }
 
       const response = await fetch(serviceUrl, {
         method: "POST",

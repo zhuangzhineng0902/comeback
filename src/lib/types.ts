@@ -78,7 +78,8 @@ export type PaperVisionGradingMark = {
   markText?: string;
   bbox?: PaperVisionBox;
   confidence?: number;
-  source?: "red-ink" | "ocr-text" | "vision" | "unknown";
+  source?: "red-ink" | "ocr-text" | "vision" | "yolo-error-mark" | "yolo-error-mark-review" | "unknown";
+  requiresManualReview?: boolean;
 };
 
 export type PaperVisionMistakeCandidate = {
@@ -89,6 +90,7 @@ export type PaperVisionMistakeCandidate = {
   confidence?: number;
   markTypes: GradingMarkType[];
   judgement: MistakeJudgement;
+  requiresManualReview?: boolean;
   evidenceSummary: string;
 };
 
@@ -97,6 +99,12 @@ export type PaperVisionLayoutRegion = {
   bbox?: PaperVisionBox;
   confidence?: number;
   source?: "ocrautoscore-yolov8" | "unknown";
+};
+
+export type PaperVisionDebugArtifact = {
+  kind: "layout" | "grading-original" | "combined-ocr" | "metadata" | "unknown";
+  path?: string;
+  url?: string;
 };
 
 export type PaperVisionContext = {
@@ -111,6 +119,7 @@ export type PaperVisionContext = {
   pageRoleHint?: "answer_sheet" | "question" | "unknown";
   gradingMarks?: PaperVisionGradingMark[];
   mistakeCandidates?: PaperVisionMistakeCandidate[];
+  debugArtifacts?: PaperVisionDebugArtifact[];
 };
 
 export type AnalysisOutput = {

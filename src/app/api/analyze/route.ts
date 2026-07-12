@@ -4,6 +4,7 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { NextResponse } from "next/server";
+import sharp from "sharp";
 import { triggerAnalysisWorker } from "@/lib/analysis/jobs";
 import { analyzeMistake } from "@/lib/analyzer";
 import { analyzeWithSimulation } from "@/lib/analyzer/simulated";
@@ -86,6 +87,55 @@ function getOcrImageConcurrency() {
 
 function isPaperVisionContext(context: PaperVisionContext | null | undefined): context is PaperVisionContext {
   return context !== null && context !== undefined;
+}
+
+async function buildCandidateEvidenceImages(image: UploadedImage, contexts: PaperVisionContext[]) {
+  const candidates = contexts.flatMap((context) => context.mistakeCandidates ?? []);
+  if (candidates.length === 0) return [];
+  const analysisSource = Buffer.from(image.analysisImageBase64, "base64");
+  const analysisMetadata = await sharp(analysisSource).metadata();
+  const analysisWidth = analysisMetadata.width ?? 0;
+  const analysisHeight = analysisMetadata.height ?? 0;
+  if (analysisWidth <= 0 || analysisHeight <= 0) return [];
+  let source = Buffer.from(image.imageBase64, "base64");
+  let sourceMetadata;
+  try {
+    sourceMetadata = await sharp(source).metadata();
+    if (!sourceMetadata.width || !sourceMetadata.height) throw new Error("Original image dimensions unavailable");
+  } catch {
+    source = analysisSource;
+    sourceMetadata = analysisMetadata;
+  }
+  const imageWidth = sourceMetadata.width ?? analysisWidth;
+  const imageHeight = sourceMetadata.height ?? analysisHeight;
+  const scaleX = imageWidth / analysisWidth;
+  const scaleY = imageHeight / analysisHeight;
+
+  const seen = new Set<string>();
+  const crops = [];
+  for (const candidate of candidates) {
+    if (!candidate.bbox) continue;
+    const key = `${candidate.questionId ?? "unknown"}:${candidate.subQuestionId ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const padding = 32;
+    const left = Math.max(0, Math.floor((candidate.bbox[0] - padding) * scaleX));
+    const top = Math.max(0, Math.floor((candidate.bbox[1] - padding) * scaleY));
+    const right = Math.min(imageWidth, Math.ceil((candidate.bbox[2] + padding) * scaleX));
+    const bottom = Math.min(imageHeight, Math.ceil((candidate.bbox[3] + padding) * scaleY));
+    if (right - left < 48 || bottom - top < 48) continue;
+    const buffer = await sharp(source)
+      .extract({ left, top, width: right - left, height: bottom - top })
+      .jpeg({ quality: 92 })
+      .toBuffer();
+    crops.push({
+      filename: `${image.filename}-candidate-q${candidate.questionId ?? "unknown"}${candidate.subQuestionId ? `-${candidate.subQuestionId}` : ""}.jpg`,
+      mimeType: "image/jpeg",
+      imageBase64: buffer.toString("base64")
+    });
+    if (crops.length >= 8) break;
+  }
+  return crops;
 }
 
 async function analyzeWithFallback(input: Parameters<typeof analyzeMistake>[0]) {
@@ -395,6 +445,8 @@ export async function POST(request: Request) {
             filename: image.filename,
             mimeType: image.analysisMimeType,
             imageBase64: image.analysisImageBase64,
+            originalImageBase64: image.imageBase64,
+            originalMimeType: image.mimeType,
             sourceImageIndex: index
           })
       )
@@ -403,11 +455,16 @@ export async function POST(request: Request) {
       filename: uploadedImages.map((image) => image.filename).join(", "),
       mimeType: firstImage.analysisMimeType,
       imageBase64: firstImage.analysisImageBase64,
-      images: uploadedImages.map((image) => ({
-        filename: image.filename,
-        mimeType: image.analysisMimeType,
-        imageBase64: image.analysisImageBase64
-      })),
+      images: uploadedImages.length === 1
+        ? [
+            { filename: firstImage.filename, mimeType: firstImage.analysisMimeType, imageBase64: firstImage.analysisImageBase64 },
+            ...await buildCandidateEvidenceImages(firstImage, paperVisionContexts)
+          ]
+        : uploadedImages.map((image) => ({
+            filename: image.filename,
+            mimeType: image.analysisMimeType,
+            imageBase64: image.analysisImageBase64
+          })),
       paperVisionContexts: paperVisionContexts.length > 0 ? paperVisionContexts : undefined,
       subjectHint: subject,
       gradeHint: grade,
@@ -421,6 +478,7 @@ export async function POST(request: Request) {
           getAnalyzeImageConcurrency(),
           async (image, index) => {
             const imagePaperVisionContexts = paperVisionContexts.filter((context) => context.sourceImageIndex === index);
+            const candidateEvidenceImages = await buildCandidateEvidenceImages(image, imagePaperVisionContexts);
             const singleImageInput = {
               filename: image.filename,
               mimeType: image.analysisMimeType,
@@ -430,7 +488,8 @@ export async function POST(request: Request) {
                   filename: image.filename,
                   mimeType: image.analysisMimeType,
                   imageBase64: image.analysisImageBase64
-                }
+                },
+                ...candidateEvidenceImages
               ],
               paperVisionContexts: imagePaperVisionContexts,
               subjectHint: subject,
