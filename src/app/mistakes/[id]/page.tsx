@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import path from "node:path";
 import React from "react";
 
+import { MistakeDeleteButton } from "@/components/MistakeDeleteButton";
 import { OriginalPhotoViewer } from "@/components/OriginalPhotoViewer";
 import { prisma } from "@/lib/db";
 import { activeMistakeWhere } from "@/lib/review-status";
@@ -56,10 +57,18 @@ export default async function MistakeDetailPage({ params }: { params: Promise<{ 
   return (
     <article className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-5">
       <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <div className="text-sm text-slate-500">
-          {mistake.grade} · {mistake.subject}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm text-slate-500">
+              {mistake.grade} · {mistake.subject}
+            </div>
+            <h1 className="mt-2 break-words text-xl font-semibold text-ink sm:text-2xl">{mistake.questionType}</h1>
+          </div>
+          <MistakeDeleteButton
+            mistakeId={mistake.id}
+            redirectTo={`/mistakes?grade=${encodeURIComponent(mistake.grade)}&subject=${encodeURIComponent(mistake.subject)}`}
+          />
         </div>
-        <h1 className="mt-2 break-words text-xl font-semibold text-ink sm:text-2xl">{mistake.questionType}</h1>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <div className="rounded-md border border-slate-200 p-3">

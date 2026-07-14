@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckSquare, RefreshCw, RotateCcw, Square } from "lucide-react";
+import { CheckSquare, RefreshCw, RotateCcw, Square, X } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatDateTimeToMinute } from "@/lib/date-format";
@@ -75,6 +75,7 @@ export function UploadHistoryPanel() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRetrying, setIsRetrying] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [previewUpload, setPreviewUpload] = useState<UploadHistoryItem | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -302,9 +303,14 @@ export function UploadHistoryPanel() {
               const checked = selectedUploadIds.includes(upload.id);
               return (
                 <article key={`${upload.kind}-${upload.id}`} className="grid gap-3 p-3 sm:grid-cols-[96px_minmax(0,1fr)_auto] sm:items-center">
-                  <div className="h-24 w-full overflow-hidden rounded-md border border-slate-200 bg-slate-50 sm:w-24">
+                  <button
+                    type="button"
+                    aria-label={`查看 ${upload.filename} 原图`}
+                    onClick={() => setPreviewUpload(upload)}
+                    className="h-24 w-full overflow-hidden rounded-md border border-slate-200 bg-slate-50 text-left transition hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900 sm:w-24"
+                  >
                     <img src={upload.imageUrl} alt={upload.filename} className="h-full w-full object-cover" />
-                  </div>
+                  </button>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`rounded-md border px-2 py-1 text-xs font-medium ${statusClasses[upload.status]}`}>
@@ -352,6 +358,45 @@ export function UploadHistoryPanel() {
           </div>
         )}
       </div>
+
+      {previewUpload ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${previewUpload.filename} 原图`}
+          className="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 p-4"
+          onClick={() => setPreviewUpload(null)}
+        >
+          <div
+            className="max-h-full w-full max-w-5xl overflow-hidden rounded-lg bg-white shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-ink">{previewUpload.filename}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  上传 {formatDateTimeToMinute(previewUpload.createdAt)} · {previewUpload.statusLabel}
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="关闭原图"
+                onClick={() => setPreviewUpload(null)}
+                className="ml-3 grid h-9 w-9 shrink-0 place-items-center rounded-md text-slate-600 transition hover:bg-slate-100 hover:text-ink"
+              >
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="max-h-[calc(100vh-120px)] overflow-auto bg-slate-100 p-3">
+              <img
+                src={previewUpload.imageUrl}
+                alt={`${previewUpload.filename} 原图`}
+                className="mx-auto h-auto max-w-full rounded-md bg-white"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

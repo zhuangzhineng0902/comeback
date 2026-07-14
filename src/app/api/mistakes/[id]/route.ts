@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { deleteMistake } from "@/lib/repositories/mistakes";
 import { activeMistakeWhere } from "@/lib/review-status";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
@@ -17,4 +18,18 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 
   return NextResponse.json({ mistake });
+}
+
+export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const { id } = await context.params;
+  const deleted = await deleteMistake({
+    mistakeId: id,
+    studentId: "default-student"
+  });
+
+  if (!deleted) {
+    return NextResponse.json({ error: "错题不存在。" }, { status: 404 });
+  }
+
+  return NextResponse.json({ deleted });
 }

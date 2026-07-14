@@ -1,6 +1,7 @@
 import Link from "next/link";
 import React from "react";
 import { formatDateTimeToMinute } from "@/lib/date-format";
+import { MistakeDeleteButton } from "@/components/MistakeDeleteButton";
 
 type MistakeSummary = {
   id: string;
@@ -27,19 +28,21 @@ const masteryLabels: Record<string, string> = {
 
 function MistakeItem({ mistake }: { mistake: MistakeSummary }) {
   return (
-    <Link
-      href={`/mistakes/${mistake.id}`}
-      className="block rounded-md border border-slate-200 bg-white p-4 transition hover:border-slate-400"
-    >
-      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <span>{mistake.grade}</span>
-        <span>{mistake.subject}</span>
-        <span>{formatDateTimeToMinute(mistake.createdAt)}</span>
-        <span>{masteryLabels[mistake.masteryStatus] ?? masteryLabels.new}</span>
+    <article className="rounded-md border border-slate-200 bg-white p-4 transition hover:border-slate-400">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <Link href={`/mistakes/${mistake.id}`} className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span>{mistake.grade}</span>
+            <span>{mistake.subject}</span>
+            <span>{formatDateTimeToMinute(mistake.createdAt)}</span>
+            <span>{masteryLabels[mistake.masteryStatus] ?? masteryLabels.new}</span>
+          </div>
+          <h2 className="mt-2 font-semibold text-ink">{mistake.questionType}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{mistake.mistakeReason}</p>
+        </Link>
+        <MistakeDeleteButton mistakeId={mistake.id} size="sm" />
       </div>
-      <h2 className="mt-2 font-semibold text-ink">{mistake.questionType}</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{mistake.mistakeReason}</p>
-    </Link>
+    </article>
   );
 }
 

@@ -59,7 +59,7 @@ function reviewStateForAnalysis(analysis: AnalysisOutput) {
   };
 }
 
-async function recalculateKnowledgeGap(tx: Prisma.TransactionClient, input: {
+export async function recalculateKnowledgeGap(tx: Prisma.TransactionClient, input: {
   studentId: string;
   knowledgePointId: string;
   latestReason?: string;
@@ -356,5 +356,92 @@ export async function updateMistakeManualReview(input: {
     }
 
     return updated;
+  }, { maxWait: 10_000, timeout: 20_000 });
+}
+
+function removeSavedMistakeFromJson(value: string | null, mistakeId: string) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return value;
+    }
+    const next = parsed.filter((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return true;
+      }
+      return (item as { mistakeId?: unknown }).mistakeId !== mistakeId;
+    });
+    return JSON.stringify(next);
+  } catch {
+    return value;
+  }
+}
+
+export async function deleteMistake(input: {
+  mistakeId: string;
+  studentId: string;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const mistake = await tx.mistake.findFirst({
+      where: {
+        id: input.mistakeId,
+        studentId: input.studentId
+      },
+      include: {
+        mistakeArchetypes: {
+          include: {
+            archetype: true
+          }
+        }
+      }
+    });
+
+    if (!mistake) {
+      return null;
+    }
+
+    const knowledgePointIds = new Set(
+      mistake.mistakeArchetypes.map((relation) => relation.archetype.knowledgePointId)
+    );
+
+    await tx.tutorMessage.deleteMany({ where: { mistakeId: mistake.id } });
+    await tx.mistakeArchetype.deleteMany({ where: { mistakeId: mistake.id } });
+    await tx.mistake.delete({ where: { id: mistake.id } });
+
+    const jobs = await tx.analysisJob.findMany({
+      where: {
+        studentId: input.studentId,
+        savedMistakesJson: { contains: mistake.id }
+      },
+      select: {
+        id: true,
+        savedMistakesJson: true
+      }
+    });
+
+    for (const job of jobs) {
+      await tx.analysisJob.update({
+        where: { id: job.id },
+        data: {
+          savedMistakesJson: removeSavedMistakeFromJson(job.savedMistakesJson, mistake.id)
+        }
+      });
+    }
+
+    for (const knowledgePointId of knowledgePointIds) {
+      await recalculateKnowledgeGap(tx, {
+        studentId: input.studentId,
+        knowledgePointId
+      });
+    }
+
+    return {
+      id: mistake.id,
+      knowledgePointIds: Array.from(knowledgePointIds)
+    };
   }, { maxWait: 10_000, timeout: 20_000 });
 }
