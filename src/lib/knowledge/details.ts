@@ -49,6 +49,13 @@ type ArchetypeRecord = {
   mistakeArchetypes: Array<{ mistake: MistakeRecord }>;
 };
 
+type TutorMessageRecord = {
+  id: string;
+  role: string;
+  content: string;
+  createdAt: Date;
+};
+
 export type KnowledgePointDetail = {
   knowledgePoint: KnowledgePointRecord;
   gap: KnowledgeGapRecord | null;
@@ -61,6 +68,7 @@ export type KnowledgePointDetail = {
     commonTraps: string[];
   }>;
   relatedMistakes: MistakeRecord[];
+  tutorMessages: TutorMessageRecord[];
 };
 
 function parseStringArray(value: string | null | undefined) {
@@ -184,7 +192,7 @@ export async function getKnowledgePointDetail(id: string): Promise<KnowledgePoin
     return null;
   }
 
-  const [gap, archetypes] = await Promise.all([
+  const [gap, archetypes, tutorMessages] = await Promise.all([
     prisma.knowledgeGap.findFirst({
       where: {
         studentId: STUDENT_ID,
@@ -201,6 +209,13 @@ export async function getKnowledgePointDetail(id: string): Promise<KnowledgePoin
         }
       },
       orderBy: { title: "asc" }
+    }),
+    prisma.knowledgePointTutorMessage.findMany({
+      where: {
+        studentId: STUDENT_ID,
+        knowledgePointId: id
+      },
+      orderBy: { createdAt: "asc" }
     })
   ]);
 
@@ -230,6 +245,7 @@ export async function getKnowledgePointDetail(id: string): Promise<KnowledgePoin
       solutionTemplate: archetype.solutionTemplate,
       commonTraps: parseStringArray(archetype.commonTraps)
     })),
-    relatedMistakes
+    relatedMistakes,
+    tutorMessages
   };
 }

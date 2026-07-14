@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import path from "node:path";
 import React from "react";
 
+import { ContextTutorChat } from "@/components/ContextTutorChat";
 import { MistakeDeleteButton } from "@/components/MistakeDeleteButton";
 import { OriginalPhotoViewer } from "@/components/OriginalPhotoViewer";
 import { prisma } from "@/lib/db";
@@ -149,21 +150,13 @@ export default async function MistakeDetailPage({ params }: { params: Promise<{ 
           )}
         </section>
 
-        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <h2 className="font-semibold text-ink">追问记录</h2>
-          {mistake.tutorMessages.length === 0 ? (
-            <p className="mt-3 text-sm text-slate-600">还没有围绕这道题继续提问。</p>
-          ) : (
-            <div className="mt-3 space-y-2">
-              {mistake.tutorMessages.map((message) => (
-                <p key={message.id} className="rounded-md bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">
-                  {message.role === "user" ? "学生：" : "老师："}
-                  {message.content}
-                </p>
-              ))}
-            </div>
-          )}
-        </section>
+        <ContextTutorChat
+          mistakeId={mistake.id}
+          title="围绕这道错题追问"
+          description="我会带上题目、孩子答案、正确答案、错因和母题作为上下文。"
+          initialMessages={mistake.tutorMessages}
+          placeholder="继续问：为什么我这一步会错？"
+        />
       </aside>
     </article>
   );

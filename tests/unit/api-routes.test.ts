@@ -51,6 +51,10 @@ const prismaMock = {
   tutorMessage: {
     createMany: vi.fn()
   },
+  knowledgePointTutorMessage: {
+    createMany: vi.fn(),
+    findMany: vi.fn()
+  },
   analysisBatch: {
     create: vi.fn(),
     findFirst: vi.fn(),
@@ -119,6 +123,7 @@ describe("api routes", () => {
     testUploadRoots.push(uploadRoot);
     process.env.UPLOAD_ROOT_DIR = uploadRoot;
     delete process.env.ENABLE_AI_FALLBACK;
+    delete process.env.MINIMAX_API_KEY;
     analyzeMistakeMock.mockReset();
     saveAnalysisAsMistakeMock.mockReset();
     analyzeImageWithOcrMock.mockReset();
@@ -133,6 +138,9 @@ describe("api routes", () => {
     prismaMock.archetype.findMany.mockReset();
     prismaMock.nonStudyRequestLog.create.mockReset();
     prismaMock.tutorMessage.createMany.mockReset();
+    prismaMock.knowledgePointTutorMessage.createMany.mockReset();
+    prismaMock.knowledgePointTutorMessage.findMany.mockReset();
+    prismaMock.knowledgePointTutorMessage.findMany.mockResolvedValue([]);
     prismaMock.analysisBatch.create.mockReset();
     prismaMock.analysisBatch.findFirst.mockReset();
     prismaMock.analysisBatch.update.mockReset();
@@ -145,6 +153,7 @@ describe("api routes", () => {
 
   afterEach(async () => {
     delete process.env.ENABLE_AI_FALLBACK;
+    delete process.env.MINIMAX_API_KEY;
     delete process.env.UPLOAD_ROOT_DIR;
     await Promise.all(testUploadRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
   });
@@ -627,7 +636,27 @@ describe("api routes", () => {
   });
 
   it("stores study chat messages for a mistake", async () => {
-    prismaMock.mistake.findFirst.mockResolvedValue({ id: "mistake-1" });
+    prismaMock.mistake.findFirst.mockResolvedValue({
+      id: "mistake-1",
+      subject: "数学",
+      grade: "八年级",
+      questionType: "选择题",
+      recognizedText: "一次函数题目",
+      studentAnswer: "A",
+      correctAnswer: "B",
+      explanation: "先看斜率，再看截距。",
+      mistakeReason: "忽略斜率符号",
+      mistakeArchetypes: [
+        {
+          archetype: {
+            title: "一次函数图像性质判断母题",
+            solutionTemplate: "看 k 和 b",
+            knowledgePoint: { name: "一次函数图像与性质" }
+          }
+        }
+      ],
+      tutorMessages: []
+    });
     const { POST } = await import("@/app/api/chat/route");
 
     const response = await POST(
@@ -640,8 +669,22 @@ describe("api routes", () => {
     const body = await response.json();
     expect(body.blocked).toBe(false);
     expect(body.reply).toContain("这道数学题怎么做？");
+    expect(body.reply).toContain("八年级数学错题");
     expect(prismaMock.mistake.findFirst).toHaveBeenCalledWith({
-      where: { id: "mistake-1", studentId: "default-student", ...activeReviewWhere }
+      where: { id: "mistake-1", studentId: "default-student", ...activeReviewWhere },
+      include: {
+        mistakeArchetypes: {
+          include: {
+            archetype: {
+              include: { knowledgePoint: true }
+            }
+          }
+        },
+        tutorMessages: {
+          orderBy: { createdAt: "asc" },
+          take: 12
+        }
+      }
     });
     expect(prismaMock.tutorMessage.createMany).toHaveBeenCalledWith({
       data: [
@@ -665,7 +708,20 @@ describe("api routes", () => {
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: "错题不存在。" });
     expect(prismaMock.mistake.findFirst).toHaveBeenCalledWith({
-      where: { id: "missing-mistake", studentId: "default-student", ...activeReviewWhere }
+      where: { id: "missing-mistake", studentId: "default-student", ...activeReviewWhere },
+      include: {
+        mistakeArchetypes: {
+          include: {
+            archetype: {
+              include: { knowledgePoint: true }
+            }
+          }
+        },
+        tutorMessages: {
+          orderBy: { createdAt: "asc" },
+          take: 12
+        }
+      }
     });
     expect(prismaMock.tutorMessage.createMany).not.toHaveBeenCalled();
   });
@@ -685,6 +741,73 @@ describe("api routes", () => {
     await expect(response.json()).resolves.toEqual({ error: "错题不存在。" });
     expect(prismaMock.nonStudyRequestLog.create).not.toHaveBeenCalled();
     expect(prismaMock.tutorMessage.createMany).not.toHaveBeenCalled();
+  });
+
+  it("stores study chat messages for a knowledge point with context", async () => {
+    prismaMock.knowledgePoint.findFirst.mockResolvedValue({
+      id: "point-1",
+      subject: "数学",
+      grade: "八年级",
+      name: "一次函数图像与性质",
+      chapter: "函数",
+      parentId: null,
+      parent: null,
+      children: []
+    });
+    prismaMock.knowledgeGap.findFirst.mockResolvedValue({
+      id: "gap-1",
+      knowledgePointId: "point-1",
+      severity: "weak",
+      errorCount: 2,
+      repeatedArchetypeCount: 1,
+      reviewSuggestion: "先复习 k 和 b。",
+      typicalReasons: "[\"忽略斜率\"]"
+    });
+    prismaMock.archetype.findMany.mockResolvedValue([
+      {
+        id: "arch-1",
+        title: "一次函数图像判断母题",
+        pattern: "判断图像",
+        solutionTemplate: "先看 k，再看 b。",
+        commonTraps: "[\"只看截距\"]",
+        mistakeArchetypes: [
+          {
+            mistake: {
+              id: "mistake-1",
+              subject: "数学",
+              grade: "八年级",
+              questionType: "选择题",
+              recognizedText: "一次函数题目",
+              studentAnswer: "A",
+              correctAnswer: "B",
+              explanation: "看 k 和 b。",
+              mistakeReason: "忽略斜率。",
+              masteryStatus: "new",
+              createdAt: new Date("2026-07-01T08:00:00.000Z")
+            }
+          }
+        ]
+      }
+    ]);
+    prismaMock.knowledgePointTutorMessage.findMany.mockResolvedValue([]);
+    const { POST } = await import("@/app/api/chat/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ knowledgePointId: "point-1", message: "这个知识点怎么复习？" })
+      })
+    );
+
+    const body = await response.json();
+    expect(body.blocked).toBe(false);
+    expect(body.reply).toContain("一次函数图像与性质");
+    expect(prismaMock.knowledgePointTutorMessage.createMany).toHaveBeenCalledWith({
+      data: [
+        { studentId: "default-student", knowledgePointId: "point-1", role: "user", content: "这个知识点怎么复习？" },
+        { studentId: "default-student", knowledgePointId: "point-1", role: "assistant", content: body.reply }
+      ]
+    });
   });
 
   it("allows study chat without a mistake id and skips persistence", async () => {

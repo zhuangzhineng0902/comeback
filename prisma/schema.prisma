@@ -8,61 +8,63 @@ datasource db {
 }
 
 model Student {
-  id                  String               @id @default(cuid())
-  name                String
-  currentGrade        String
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  mistakes            Mistake[]
-  knowledgeGaps       KnowledgeGap[]
-  nonStudyRequestLogs NonStudyRequestLog[]
-  analysisBatches     AnalysisBatch[]
-  analysisJobs        AnalysisJob[]
+  id                          String                       @id @default(cuid())
+  name                        String
+  currentGrade                String
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  mistakes                    Mistake[]
+  knowledgeGaps               KnowledgeGap[]
+  knowledgePointTutorMessages KnowledgePointTutorMessage[]
+  nonStudyRequestLogs         NonStudyRequestLog[]
+  analysisBatches             AnalysisBatch[]
+  analysisJobs                AnalysisJob[]
 }
 
 model Mistake {
-  id                 String              @id @default(cuid())
-  studentId          String
-  imagePath          String
-  recognizedText     String
-  subject            String
-  grade              String
-  questionType       String
-  studentAnswer      String
-  correctAnswer      String
-  explanation        String
-  mistakeReason      String
-  masteryStatus      String              @default("new")
-  aiJudgement        String              @default("unknown")
-  needsManualReview  Boolean             @default(false)
-  reviewStatus       String              @default("not_required")
-  reviewNote         String?
-  reviewedAt         DateTime?
-  contentStatus      String              @default("complete")
-  contentJson        String?
-  contentError       String?
-  contentUpdatedAt   DateTime?
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  student            Student             @relation(fields: [studentId], references: [id])
-  mistakeArchetypes  MistakeArchetype[]
-  tutorMessages      TutorMessage[]
+  id                String             @id @default(cuid())
+  studentId         String
+  imagePath         String
+  recognizedText    String
+  subject           String
+  grade             String
+  questionType      String
+  studentAnswer     String
+  correctAnswer     String
+  explanation       String
+  mistakeReason     String
+  masteryStatus     String             @default("new")
+  aiJudgement       String             @default("unknown")
+  needsManualReview Boolean            @default(false)
+  reviewStatus      String             @default("not_required")
+  reviewNote        String?
+  reviewedAt        DateTime?
+  contentStatus     String             @default("complete")
+  contentJson       String?
+  contentError      String?
+  contentUpdatedAt  DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  student           Student            @relation(fields: [studentId], references: [id])
+  mistakeArchetypes MistakeArchetype[]
+  tutorMessages     TutorMessage[]
 
   @@index([studentId, subject, grade])
 }
 
 model KnowledgePoint {
-  id            String           @id @default(cuid())
+  id            String                       @id @default(cuid())
   subject       String
   grade         String
   name          String
   chapter       String
   parentId      String?
-  sortOrder     Int              @default(0)
-  parent        KnowledgePoint?  @relation("KnowledgePointTree", fields: [parentId], references: [id])
-  children      KnowledgePoint[] @relation("KnowledgePointTree")
+  sortOrder     Int                          @default(0)
+  parent        KnowledgePoint?              @relation("KnowledgePointTree", fields: [parentId], references: [id])
+  children      KnowledgePoint[]             @relation("KnowledgePointTree")
   knowledgeGaps KnowledgeGap[]
   archetypes    Archetype[]
+  tutorMessages KnowledgePointTutorMessage[]
 
   @@unique([subject, grade, name])
   @@index([subject, grade])
@@ -111,9 +113,9 @@ model MistakeArchetype {
   mistake         Mistake   @relation(fields: [mistakeId], references: [id])
   archetype       Archetype @relation(fields: [archetypeId], references: [id])
 
+  @@unique([mistakeId, archetypeId])
   @@index([archetypeId])
   @@index([mistakeId])
-  @@unique([mistakeId, archetypeId])
 }
 
 model TutorMessage {
@@ -125,6 +127,20 @@ model TutorMessage {
   mistake   Mistake  @relation(fields: [mistakeId], references: [id])
 
   @@index([mistakeId])
+}
+
+model KnowledgePointTutorMessage {
+  id               String         @id @default(cuid())
+  studentId        String
+  knowledgePointId String
+  role             String
+  content          String
+  createdAt        DateTime       @default(now())
+  knowledgePoint   KnowledgePoint @relation(fields: [knowledgePointId], references: [id])
+  student          Student        @relation(fields: [studentId], references: [id])
+
+  @@index([studentId, knowledgePointId, createdAt])
+  @@index([knowledgePointId])
 }
 
 model NonStudyRequestLog {

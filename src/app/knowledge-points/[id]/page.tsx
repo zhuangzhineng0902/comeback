@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import React from "react";
 
+import { ContextTutorChat } from "@/components/ContextTutorChat";
 import { RichExplanationCard } from "@/components/RichExplanationCard";
 import { SeverityBadge } from "@/components/SeverityBadge";
 import { getKnowledgePointDetail } from "@/lib/knowledge/details";
@@ -31,7 +32,7 @@ export default async function KnowledgePointDetailPage({ params }: { params: Pro
     notFound();
   }
 
-  const { knowledgePoint, gap, richExplanation, archetypes, relatedMistakes } = detail;
+  const { knowledgePoint, gap, richExplanation, archetypes, relatedMistakes, tutorMessages } = detail;
   const treeHref = `/tree?grade=${encodeURIComponent(knowledgePoint.grade)}&subject=${encodeURIComponent(knowledgePoint.subject)}`;
 
   return (
@@ -133,6 +134,14 @@ export default async function KnowledgePointDetailPage({ params }: { params: Pro
           </div>
         )}
       </section>
+
+      <ContextTutorChat
+        knowledgePointId={knowledgePoint.id}
+        title="围绕这个知识点追问"
+        description="我会带上知识漏洞、知识树位置、母题和关联错题作为上下文。"
+        initialMessages={tutorMessages}
+        placeholder="继续问：这个知识点应该怎么复习？"
+      />
     </article>
   );
 }
